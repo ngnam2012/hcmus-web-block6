@@ -1,77 +1,99 @@
-# Task API — Bài thực hành Authorization & Access Control (Block 6)
-**Trường:** Đại học Khoa học Tự nhiên TP.HCM (HCMUS) — Advanced Web Development
+# Task Management API — Block 6: Authorization
 
-> 📄 **Xem báo cáo nộp bài chi tiết 5 thành phần theo chuẩn Slide 26 tại [REPORT.md](./REPORT.md)**.
+Bài thực hành theo [học liệu Block 6](../slides.html): V1 sửa IDOR/BOLA, V2 RBAC theo project, V3 kiểm assignee và trạng thái, V4 tenant boundary (mở rộng). Báo cáo năm thành phần và bảng đối chiếu yêu cầu ở [REPORT.md](REPORT.md).
 
----
+## Chạy và kiểm thử
 
-## 1. Cấu trúc dự án
+Cần Node.js 22 trở lên và npm. Trong PowerShell, dùng `npm.cmd` nếu execution policy chặn `npm.ps1`.
 
-```
-task-api/
-├── public/
-│   └── index.html      # Interactive E2E Browser Dashboard (giao diện web kiểm thử trực quan)
-├── src/
-│   ├── db.js           # Dữ liệu mẫu (users, projects, tasks)
-│   ├── auth.js         # Middleware xác thực JWT Bearer Token
-│   ├── rbac.js         # Ma trận quyền RBAC
-│   ├── taskService.js  # Business layer: PEP & PDP (v0, v1, v2, v3, v4)
-│   └── server.js       # Express server & API endpoints
-├── tests/
-│   ├── run.js          # Test runner tự động (39 test cases: unit + HTTP integration)
-│   └── generate-tokens.js
-├── REPORT.md           # Báo cáo nộp bài đầy đủ 5 thành phần chuẩn Slide 26
-└── package.json
-```
-
----
-
-## 2. Hướng dẫn chạy và kiểm thử
-
-### Cài đặt dependencies
 ```bash
-npm install
-```
-
-### Chạy kiểm thử tự động (Automated Tests)
-```bash
+cd task-api
+npm ci
 npm test
 ```
-> Lệnh trên sẽ tự động chạy **39 test cases** bao gồm 31 unit test logic phân quyền qua các tầng V1-V4 và 8 HTTP integration test thực tế qua Express server.
 
-### Trải nghiệm kiểm thử E2E trên trình duyệt (Browser Dashboard)
-1. Khởi động server:
-   ```bash
-   npm start
-   ```
-2. Mở trình duyệt tại:
-   ```
-   http://localhost:3000
-   ```
-3. Tại giao diện web, bạn có thể:
-   - Thử nghiệm 1-click các kịch bản đọc, sửa, xóa, giả mạo role, giả mạo tenant.
-   - Bấm nút **"🚀 CHẠY TOÀN BỘ TEST ORACLE"** để xem 17 test chạy tự động ngay trên trình duyệt.
-   - Xem bảng ma trận phân quyền và so sánh minh chứng lỗi IDOR (trước vs sau khi sửa).
+`npm test` chạy 150 test service/HTTP, bao gồm đủ 17 ca oracle và minh chứng cùng một assertion IDOR đỏ trên V0, xanh trên V1. Test tự tạo server ở cổng ngẫu nhiên, fixture riêng và đóng tài nguyên; không cần chạy server trước.
 
-### Khởi động từng phiên bản cụ thể (Cross-platform)
 ```bash
-npm run start:v0    # V0: Starter (có lỗ hổng IDOR)
-npm run start:v1    # V1: Sửa IDOR đọc
-npm run start:v2    # V2: RBAC theo project
-npm run start:v3    # V3: ReBAC + ABAC
-npm run start:v4    # V4: Tenant boundary (Hoàn chỉnh)
+npm run test:browser
+npm run test:all
 ```
 
----
+Browser test tự mở Chrome/Edge ở chế độ headless, kiểm tra kết quả thực tế của giao diện, 17 ca oracle và minh chứng IDOR, rồi cập nhật bảy ảnh trong `public/screenshots/`. Cần Chrome/Edge đã cài; có thể đặt `CHROME_PATH` tới executable nếu không nằm ở vị trí thông thường. `test:all` chạy cả backend và browser bằng một lệnh.
 
-## 3. Bảng tóm tắt các phiên bản (V0 → V4)
+## API mặc định: V4 cố định
 
-| Phiên bản | Nội dung kiểm quyền | Mục tiêu giải quyết |
-|---|---|---|
-| **V0** | Chỉ kiểm token hợp lệ | Tái hiện lỗ hổng IDOR/BOLA (Alice đọc được B1) |
-| **V1** | Kiểm thành viên project khi đọc | Sửa lỗi IDOR cho thao tác `read` |
-| **V2** | RBAC theo project (`Viewer`, `Member`, `Owner`) | Bảo vệ thao tác ghi, xóa, quản lý TV; chống giả mạo role |
-| **V3** | ReBAC (`assignee`) + ABAC (`status == 'Open'`) | Thu hẹp quyền sửa của `Member` |
-| **V4** | Tenant Boundary (`user.tenant == project.tenant`) | Cách ly tổ chức; Admin chỉ có quyền trong tenant của mình |
+```bash
+npm start
+npm run tokens
+```
 
-Chi tiết đầy đủ về **Bảng chính sách quyền, Automated tests, Evidence IDOR, Code Diff, và Giải thích lựa chọn** được trình bày chi tiết trong file **[REPORT.md](./REPORT.md)**.
+Mở `http://127.0.0.1:3000`. Dán token mẫu được tạo bằng CLI vào trường Bearer token trên giao diện. Token mẫu phục vụ dữ liệu giả định của bài tập; HTTP API mặc định không có endpoint cấp token hàng loạt.
+
+API bỏ qua `x-version` và `?version`; client không thể đổi policy. `POST /api/version`, `/api/tokens`, `/api/db`, `/test/reset` và `/api/test/reset` đều không tồn tại trong chế độ này. JWT chỉ xác định subject; role, admin và tenant được tra từ DB hiện tại. Các thao tác đọc/ghi/xóa/quản lý thành viên đều qua business policy `authorize`.
+
+| Endpoint | Chức năng |
+|---|---|
+| `GET /tasks/:id` | Đọc task trong phạm vi được phép |
+| `PATCH /tasks/:id` | Cập nhật `title`, `status`, `assignee` |
+| `DELETE /projects/:id` | Xóa project và các task của project |
+| `POST /projects/:id/members` | Thêm/đổi role hoặc gỡ thành viên |
+| `GET /health`, `GET /api/version` | Thông tin trạng thái, không có dữ liệu task/token |
+
+Ví dụ PATCH hợp lệ:
+
+```json
+{"title":"Hoàn tất bản thiết kế","status":"Closed"}
+```
+
+`project`, `id`, `tenant`, `tenantId`, `role` và trường lạ bị từ chối 400. Assignee phải là thành viên cùng project và tenant. Không thể dùng PATCH để di chuyển task sang project khác.
+
+Payload quản lý thành viên, chỉ Owner hoặc Admin cùng tenant được phép:
+
+```json
+{"userId":"bob","role":"Viewer"}
+```
+
+```json
+{"userId":"bob","remove":true}
+```
+
+Role chỉ nhận `Viewer`, `Member`, `Owner`. Không được gỡ hoặc giáng role Owner cuối cùng (409). Payload rỗng `{}` chỉ kiểm tra quyền cho ca oracle, không thay đổi dữ liệu. Xóa membership hoặc đổi role có hiệu lực ngay với JWT đang còn hạn.
+
+## Demo so sánh V0–V4
+
+```bash
+npm run start:demo
+```
+
+Mở cùng địa chỉ localhost để chọn người dùng mẫu, đổi phiên bản, reset fixture, chạy oracle và minh chứng IDOR trực tiếp. Demo chỉ bind `127.0.0.1`, dùng dữ liệu giả và có các bản V0/V1 cố ý thiếu kiểm quyền để phục vụ học tập. Chế độ demo được bật ở lúc khởi động, không bật bằng request HTTP. `/api/db` không được cung cấp ở cả hai chế độ.
+
+Các lệnh `start:v0`, `start:v1`, `start:v2`, `start:v3` khởi động demo ở phiên bản tương ứng. `start:v4` tương đương API V4 cố định. Tham số CLI là `--version=vN`; V0–V3 yêu cầu `--demo`.
+
+## Minh chứng IDOR đỏ → xanh
+
+```bash
+npm run test:idor
+npm run test:idor -- --version=v0
+npm run test:idor -- --version=v1
+```
+
+Lệnh đầu kiểm chứng toàn bộ quy trình và thoát 0 khi V0 bị bắt lỗi, V1 đạt và các request hợp lệ vẫn được phép. Lệnh V0 riêng giữ kỳ vọng 403, nhận 200 và **cố ý thoát 1**; lệnh V1 dùng cùng assertion và thoát 0. Đây là negative control, không phải lỗi của bộ test cuối cùng.
+
+## Cấu trúc
+
+```text
+src/auth.js              JWT authentication, identity từ subject
+src/rbac.js              Ma trận role/action, deny by default
+src/taskService.js       authorize + business operations + validation
+src/server.js            App factory, HTTP routes, demo isolation
+src/db.js                Dữ liệu mẫu và fixture clone
+tests/run.js             150 test với status/body/data invariants
+tests/oracle.js          17 ca oracle của học liệu
+tests/idor-regression.js Cùng assertion đỏ → xanh
+tests/browser-e2e.js     Browser assertions + ảnh minh chứng
+evidence/               Log kiểm chứng và code diff để nộp
+REPORT.md               Năm thành phần bài nộp
+```
+
+Giới hạn: DB trong bộ nhớ, JWT mẫu dùng secret phát triển nếu chưa đặt `JWT_SECRET`; chưa xây login/OAuth2 mới, list/search API, database transaction, concurrent revocation hoặc cache phân quyền. Chi tiết và phạm vi kiểm thử ở REPORT.

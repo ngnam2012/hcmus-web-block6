@@ -1,0 +1,8 @@
+Command: node tests/idor-regression.js --version=v0
+v0: {"status":200,"body":{"id":"B1","project":"beta","title":"Ngân sách dự án Beta","assignee":"charlie","status":"Open"}}
+[FAIL] Alice must not read task B1 outside her project
+
+200 !== 403
+
+
+Exit code: 1

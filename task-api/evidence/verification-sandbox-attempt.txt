@@ -1,0 +1,191 @@
+Verification date: 2026-10-29 (Asia/Bangkok)
+Node: v24.11.0
+Platform: win32
+Command: npm.cmd run test:all
+
+
+> task-api@1.0.0 test:all
+> npm run test && npm run test:browser
+
+
+> task-api@1.0.0 test
+> node tests/run.js
+
+Task API — authorization regression suite (exact status + data invariants)
+[PASS] v2 matrix Viewer.read
+[PASS] v2 matrix Viewer.edit
+[PASS] v2 matrix Viewer.delete
+[PASS] v2 matrix Viewer.members
+[PASS] v2 matrix Member.read
+[PASS] v2 matrix Member.edit
+[PASS] v2 matrix Member.delete
+[PASS] v2 matrix Member.members
+[PASS] v2 matrix Owner.read
+[PASS] v2 matrix Owner.edit
+[PASS] v2 matrix Owner.delete
+[PASS] v2 matrix Owner.members
+[PASS] v3 matrix Viewer.read
+[PASS] v3 matrix Viewer.edit
+[PASS] v3 matrix Viewer.delete
+[PASS] v3 matrix Viewer.members
+[PASS] v3 matrix Member.read
+[PASS] v3 matrix Member.edit
+[PASS] v3 matrix Member.delete
+[PASS] v3 matrix Member.members
+[PASS] v3 matrix Owner.read
+[PASS] v3 matrix Owner.edit
+[PASS] v3 matrix Owner.delete
+[PASS] v3 matrix Owner.members
+[PASS] v4 matrix Viewer.read
+[PASS] v4 matrix Viewer.edit
+[PASS] v4 matrix Viewer.delete
+[PASS] v4 matrix Viewer.members
+[PASS] v4 matrix Member.read
+[PASS] v4 matrix Member.edit
+[PASS] v4 matrix Member.delete
+[PASS] v4 matrix Member.members
+[PASS] v4 matrix Owner.read
+[PASS] v4 matrix Owner.edit
+[PASS] v4 matrix Owner.delete
+[PASS] v4 matrix Owner.members
+[PASS] v1 object-level read alice/A1 -> 200
+[PASS] v1 object-level read alice/B1 -> 403
+[PASS] v1 object-level read charlie/B1 -> 200
+[PASS] v1 object-level read bob/A1 -> 200
+[PASS] v1 object-level read bob/B1 -> 403
+[PASS] v1 object-level read alice/missing -> 404
+[PASS] v3 Member edit denied: unassigned; no mutation
+[PASS] v3 Member edit denied: assigned_to_other; no mutation
+[PASS] v3 Member edit denied: closed; no mutation
+[PASS] v3 Member edit denied: other_project; no mutation
+[PASS] v3 Owner can edit an unassigned Closed task
+[PASS] v4 Member edit denied: unassigned; no mutation
+[PASS] v4 Member edit denied: assigned_to_other; no mutation
+[PASS] v4 Member edit denied: closed; no mutation
+[PASS] v4 Member edit denied: other_project; no mutation
+[PASS] v4 Owner can edit an unassigned Closed task
+[PASS] v4 Admin own tenant read allowed
+[PASS] v4 dana forbidden scope read; no mutation
+[PASS] v4 alice forbidden scope read; no mutation
+[PASS] v4 charlie forbidden scope read; no mutation
+[PASS] v4 nonmember forbidden scope read; no mutation
+[PASS] Business entry point rejects missing/unknown principal for read
+[PASS] v4 Admin own tenant edit allowed
+[PASS] v4 dana forbidden scope edit; no mutation
+[PASS] v4 alice forbidden scope edit; no mutation
+[PASS] v4 charlie forbidden scope edit; no mutation
+[PASS] v4 nonmember forbidden scope edit; no mutation
+[PASS] Business entry point rejects missing/unknown principal for edit
+[PASS] v4 Admin own tenant delete allowed
+[PASS] v4 dana forbidden scope delete; no mutation
+[PASS] v4 alice forbidden scope delete; no mutation
+[PASS] v4 charlie forbidden scope delete; no mutation
+[PASS] v4 nonmember forbidden scope delete; no mutation
+[PASS] Business entry point rejects missing/unknown principal for delete
+[PASS] v4 Admin own tenant members allowed
+[PASS] v4 dana forbidden scope members; no mutation
+[PASS] v4 alice forbidden scope members; no mutation
+[PASS] v4 charlie forbidden scope members; no mutation
+[PASS] v4 nonmember forbidden scope members; no mutation
+[PASS] Business entry point rejects missing/unknown principal for members
+[PASS] Unrecognized project role Admin grants no access
+[PASS] Unrecognized project role constructor grants no access
+[PASS] Unrecognized project role __proto__ grants no access
+[PASS] Unrecognized project role toString grants no access
+[PASS] Unrecognized project role Unknown grants no access
+[PASS] HTTP oracle V1: Anonymous đọc A1
+[PASS] HTTP oracle V1: Alice đọc A1
+[PASS] HTTP oracle V1: Alice đọc B1
+[PASS] HTTP oracle V1: Charlie đọc B1
+[PASS] HTTP oracle V2: Viewer sửa A1
+[PASS] HTTP oracle V2: Member xóa Alpha
+[PASS] HTTP oracle V2: Member quản lý thành viên
+[PASS] HTTP oracle V2: Owner xóa Alpha
+[PASS] HTTP oracle V2: Owner quản lý thành viên
+[PASS] HTTP oracle V2: Bob giả mạo role Admin
+[PASS] HTTP oracle V3: Member sửa task được giao còn Open
+[PASS] HTTP oracle V3: Member sửa task chưa được giao
+[PASS] HTTP oracle V3: Member sửa task Closed
+[PASS] HTTP oracle V3: Member sửa task project khác
+[PASS] HTTP oracle V4: Admin Alpha đọc A1
+[PASS] HTTP oracle V4: Admin Alpha đọc B1
+[PASS] HTTP oracle V4: Admin Alpha giả mạo tenant beta
+[PASS] HTTP Anonymous GET /tasks/A1 -> 401
+[PASS] HTTP Anonymous PATCH /tasks/A1 -> 401
+[PASS] HTTP Anonymous DELETE /projects/alpha -> 401
+[PASS] HTTP Anonymous POST /projects/alpha/members -> 401
+[PASS] HTTP authentication rejects invalid signature
+[PASS] HTTP authentication rejects expired token
+[PASS] HTTP authentication rejects unknown subject
+[PASS] HTTP authentication rejects prototype subject
+[PASS] HTTP signed id/role/tenant claims cannot override verified sub
+[PASS] HTTP body userId and role cannot impersonate Owner
+[PASS] HTTP client query cannot downgrade V4
+[PASS] HTTP client header cannot downgrade V4
+[PASS] HTTP normal API has no demo helper POST /api/version
+[PASS] HTTP normal API has no demo helper GET /api/tokens
+[PASS] HTTP normal API has no demo helper GET /api/db
+[PASS] HTTP normal API has no demo helper POST /test/reset
+[PASS] HTTP normal API has no demo helper POST /api/test/reset
+[PASS] HTTP demo switching is explicit and isolated from the normal API
+[PASS] HTTP PATCH rejects cross-tenant project transfer and preserves data
+[PASS] HTTP PATCH rejects same-tenant project reassignment and preserves data
+[PASS] HTTP PATCH rejects task id and preserves data
+[PASS] HTTP PATCH rejects tenant and preserves data
+[PASS] HTTP PATCH rejects tenantId and preserves data
+[PASS] HTTP PATCH rejects role and preserves data
+[PASS] HTTP PATCH rejects unknown field and preserves data
+[PASS] HTTP PATCH rejects invalid status and preserves data
+[PASS] HTTP PATCH rejects invalid title and preserves data
+[PASS] HTTP PATCH rejects empty title and preserves data
+[PASS] HTTP PATCH rejects foreign assignee and preserves data
+[PASS] HTTP PATCH rejects unknown assignee and preserves data
+[PASS] HTTP PATCH rejects array and preserves data
+[PASS] HTTP PATCH rejects null and preserves data
+[PASS] HTTP PATCH rejects prototype mutation and preserves data
+[PASS] HTTP authorized PATCH persists allowed fields; closed task cannot be reopened by Member
+[PASS] HTTP missing/prototype resource GET /tasks/missing -> exactly 404
+[PASS] HTTP missing/prototype resource PATCH /tasks/missing -> exactly 404
+[PASS] HTTP missing/prototype resource DELETE /projects/missing -> exactly 404
+[PASS] HTTP missing/prototype resource POST /projects/missing/members -> exactly 404
+[PASS] HTTP missing/prototype resource GET /tasks/constructor -> exactly 404
+[PASS] HTTP missing/prototype resource GET /tasks/__proto__ -> exactly 404
+[PASS] HTTP missing/prototype resource DELETE /projects/constructor -> exactly 404
+[PASS] HTTP missing/prototype resource POST /projects/__proto__/members -> exactly 404
+[PASS] HTTP Owner changes membership; same JWT loses permissions immediately
+[PASS] HTTP Owner adds same-tenant user and grants actual read access
+[PASS] HTTP membership rejects cross-tenant user
+[PASS] HTTP membership rejects unknown user
+[PASS] HTTP membership rejects invented Admin role
+[PASS] HTTP membership rejects prototype role
+[PASS] HTTP membership rejects remove final Owner
+[PASS] HTTP membership rejects demote final Owner
+[PASS] HTTP current server tenant/admin state overrides stale token claims
+[RED — expected regression failure] V0: expected 403, received 200
+{"status":200,"body":{"id":"B1","project":"beta","title":"Ngân sách dự án Beta","assignee":"charlie","status":"Open"}}
+[GREEN] V1: the SAME assertion expected 403, received 403
+{"status":403,"body":{"error":"forbidden"}}
+[GREEN] Positive controls: Alice reads A1; Charlie reads B1
+[PASS] IDOR RED -> GREEN uses the unchanged deny assertion, with positive controls
+
+RESULT: 150/150 passed; 0 failed
+
+> task-api@1.0.0 test:browser
+> node tests/browser-e2e.js
+
+[E2E] Starting headless browser...
+[FAIL] Browser E2E: TimeoutError: Timed out after waiting 30000ms
+    at D:\Project\hcmus-web-block6\task-api\node_modules\puppeteer-core\lib\cjs\puppeteer\common\util.js:246:19
+    at D:\Project\hcmus-web-block6\task-api\node_modules\puppeteer-core\lib\cjs\third_party\rxjs\rxjs.js:3991:35
+    at OperatorSubscriber2._this._next (D:\Project\hcmus-web-block6\task-api\node_modules\puppeteer-core\lib\cjs\third_party\rxjs\rxjs.js:1055:13)
+    at Subscriber2.next (D:\Project\hcmus-web-block6\task-api\node_modules\puppeteer-core\lib\cjs\third_party\rxjs\rxjs.js:678:16)
+    at AsyncAction2.<anonymous> (D:\Project\hcmus-web-block6\task-api\node_modules\puppeteer-core\lib\cjs\third_party\rxjs\rxjs.js:4868:24)
+    at AsyncAction2._execute (D:\Project\hcmus-web-block6\task-api\node_modules\puppeteer-core\lib\cjs\third_party\rxjs\rxjs.js:1974:16)
+    at AsyncAction2.execute (D:\Project\hcmus-web-block6\task-api\node_modules\puppeteer-core\lib\cjs\third_party\rxjs\rxjs.js:1963:26)
+    at AsyncScheduler2.flush (D:\Project\hcmus-web-block6\task-api\node_modules\puppeteer-core\lib\cjs\third_party\rxjs\rxjs.js:2235:30)
+    at listOnTimeout (node:internal/timers:608:17)
+    at process.processTimers (node:internal/timers:543:7) {
+  [cause]: undefined
+}
+
+Exit code: 1

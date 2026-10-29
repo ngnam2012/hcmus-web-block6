@@ -4,9 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Task API — Kiểm soát truy cập và Phân quyền (Block 6 HCMUS)</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg: #0d1117;
@@ -119,6 +116,9 @@
       align-items: center;
       gap: 6px;
     }
+    button:disabled, select:disabled, input:disabled { opacity: .5; cursor: not-allowed; }
+    [hidden] { display: none !important; }
+    .mode-banner { padding: 12px 16px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 8px; font-size: .85rem; }
     .btn:hover { background: #30363d; border-color: #8b949e; }
     .btn-primary { background: #238636; border-color: rgba(240, 246, 252, 0.1); color: #fff; }
     .btn-primary:hover { background: #2ea043; }
@@ -209,7 +209,7 @@
     <div style="display:flex; align-items:center; gap:12px;">
       <div>
         <span style="font-size:0.8rem; color:var(--text-muted); font-weight:600;">Phiên bản hoạt động:</span>
-        <select id="server-version-select" style="width:auto; margin:0; padding:6px 10px; font-weight:700;">
+        <select id="server-version-select" disabled style="width:auto; margin:0; padding:6px 10px; font-weight:700;">
           <option value="v0">V0 — Starter (Lỗ hổng IDOR / BOLA)</option>
           <option value="v1">V1 — Sửa IDOR (Kiểm tra thành viên)</option>
           <option value="v2">V2 — RBAC theo Project</option>
@@ -217,9 +217,11 @@
           <option value="v4" selected>V4 — Ranh giới Tenant (Hoàn chỉnh)</option>
         </select>
       </div>
-      <button class="btn btn-sm" id="btn-reset-db">Khởi tạo lại CSDL</button>
+      <button class="btn btn-sm" id="btn-reset-db" disabled>Khởi tạo lại CSDL</button>
     </div>
   </header>
+
+  <div id="mode-banner" class="mode-banner" role="status">Đang kết nối API...</div>
 
   <!-- Thanh chuyển đổi Tabs -->
   <div class="nav-tabs">
@@ -237,7 +239,7 @@
         <div class="card">
           <div class="card-title">Các kịch bản kiểm thử nhanh (Nhấn để chạy)</div>
           <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; cursor:pointer; font-size:0.85rem; color:var(--text); background:rgba(88,166,255,0.08); padding:8px 12px; border-radius:6px; border:1px solid var(--border);">
-            <input type="checkbox" id="auto-reset-cb" checked style="width:auto; margin:0;">
+            <input type="checkbox" id="auto-reset-cb" disabled style="width:auto; margin:0;">
             <span>Tự động làm mới CSDL trước mỗi request (Khuyên dùng khi thử nghiệm)</span>
           </label>
           <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:12px;">
@@ -245,57 +247,57 @@
           </p>
 
           <div style="font-size:0.8rem; font-weight:700; color:var(--primary); margin:8px 0 4px;">1. Xác thực và Đọc task (V1 Sửa IDOR)</div>
-          <button class="test-scenario-btn" data-who="alice" data-method="GET" data-path="/tasks/A1" data-desc="Alice đọc task A1 (thuộc Alpha)">
+          <button class="test-scenario-btn" disabled data-who="alice" data-method="GET" data-path="/tasks/A1" data-desc="Alice đọc task A1 (thuộc Alpha)">
             <span><b>Alice</b> đọc <b>Task A1</b> (cùng project Alpha)</span>
             <span class="status-pill pill-200">Kỳ vọng: 200 OK</span>
           </button>
-          <button class="test-scenario-btn" data-who="alice" data-method="GET" data-path="/tasks/B1" data-desc="Alice đọc task B1 (thuộc Beta - IDOR test)">
+          <button class="test-scenario-btn" disabled data-who="alice" data-method="GET" data-path="/tasks/B1" data-desc="Alice đọc task B1 (thuộc Beta - IDOR test)">
             <span><b>Alice</b> đọc <b>Task B1</b> (Kiểm thử lỗi IDOR)</span>
             <span class="status-pill pill-403">V0: 200 | V1+: 403</span>
           </button>
-          <button class="test-scenario-btn" data-who="charlie" data-method="GET" data-path="/tasks/B1" data-desc="Charlie đọc task B1 (Owner Beta)">
+          <button class="test-scenario-btn" disabled data-who="charlie" data-method="GET" data-path="/tasks/B1" data-desc="Charlie đọc task B1 (Owner Beta)">
             <span><b>Charlie</b> đọc <b>Task B1</b> (Owner project Beta)</span>
             <span class="status-pill pill-200">Kỳ vọng: 200 OK</span>
           </button>
 
           <div style="font-size:0.8rem; font-weight:700; color:var(--primary); margin:12px 0 4px;">2. Phân quyền chức năng RBAC (V2)</div>
-          <button class="test-scenario-btn" data-who="bob" data-method="DELETE" data-path="/projects/alpha" data-desc="Bob (Member) xóa Project Alpha">
+          <button class="test-scenario-btn" disabled data-who="bob" data-method="DELETE" data-path="/projects/alpha" data-desc="Bob (Member) xóa Project Alpha">
             <span><b>Bob</b> (Member) xóa Project Alpha</span>
             <span class="status-pill pill-403">Kỳ vọng: 403</span>
           </button>
-          <button class="test-scenario-btn" data-who="bob" data-method="DELETE" data-path="/projects/alpha" data-body='{"role":"Admin"}' data-desc="Bob tự khai role: Admin">
+          <button class="test-scenario-btn" disabled data-who="bob" data-method="DELETE" data-path="/projects/alpha" data-body='{"role":"Admin"}' data-desc="Bob tự khai role: Admin">
             <span><b>Bob</b> tự khai body role=Admin để xóa Alpha</span>
             <span class="status-pill pill-403">Kỳ vọng: 403</span>
           </button>
-          <button class="test-scenario-btn" data-who="alice" data-method="DELETE" data-path="/projects/alpha" data-desc="Alice (Owner) xóa Project Alpha">
+          <button class="test-scenario-btn" disabled data-who="alice" data-method="DELETE" data-path="/projects/alpha" data-desc="Alice (Owner) xóa Project Alpha">
             <span><b>Alice</b> (Owner) xóa Project Alpha</span>
             <span class="status-pill pill-200">Kỳ vọng: 200 OK</span>
           </button>
 
           <div style="font-size:0.8rem; font-weight:700; color:var(--primary); margin:12px 0 4px;">3. Điều kiện ReBAC và ABAC (V3)</div>
-          <button class="test-scenario-btn" data-who="bob" data-method="PATCH" data-path="/tasks/A1" data-body='{"title":"Đã sửa bởi Bob"}' data-desc="Bob sửa A1 (assignee=bob, Open)">
+          <button class="test-scenario-btn" disabled data-who="bob" data-method="PATCH" data-path="/tasks/A1" data-body='{"title":"Đã sửa bởi Bob"}' data-desc="Bob sửa A1 (assignee=bob, Open)">
             <span><b>Bob</b> sửa Task A1 (được giao, còn mở)</span>
             <span class="status-pill pill-200">Kỳ vọng: 200 OK</span>
           </button>
-          <button class="test-scenario-btn" data-who="bob" data-method="PATCH" data-path="/tasks/A2" data-body='{"title":"Bob cố sửa"}' data-desc="Bob sửa A2 (chưa assign)">
+          <button class="test-scenario-btn" disabled data-who="bob" data-method="PATCH" data-path="/tasks/A2" data-body='{"title":"Bob cố sửa"}' data-desc="Bob sửa A2 (chưa assign)">
             <span><b>Bob</b> sửa Task A2 (chưa được giao cho Bob)</span>
             <span class="status-pill pill-403">Kỳ vọng: 403</span>
           </button>
 
           <div style="font-size:0.8rem; font-weight:700; color:var(--primary); margin:12px 0 4px;">4. Ranh giới Tenant (V4)</div>
-          <button class="test-scenario-btn" data-who="dana" data-method="GET" data-path="/tasks/A1" data-desc="Dana (Admin Alpha) đọc A1">
+          <button class="test-scenario-btn" disabled data-who="dana" data-method="GET" data-path="/tasks/A1" data-desc="Dana (Admin Alpha) đọc A1">
             <span><b>Dana</b> (Admin Alpha) đọc Task A1 (cùng tenant Alpha)</span>
             <span class="status-pill pill-200">Kỳ vọng: 200 OK</span>
           </button>
-          <button class="test-scenario-btn" data-who="dana" data-method="GET" data-path="/tasks/B1" data-desc="Dana đọc B1 (thuộc Beta)">
+          <button class="test-scenario-btn" disabled data-who="dana" data-method="GET" data-path="/tasks/B1" data-desc="Dana đọc B1 (thuộc Beta)">
             <span><b>Dana</b> đọc Task B1 (khác tenant Beta)</span>
             <span class="status-pill pill-403">Kỳ vọng: 403</span>
           </button>
-          <button class="test-scenario-btn" data-who="dana" data-method="GET" data-path="/tasks/B1" data-header="X-Tenant-Id: beta" data-desc="Dana gửi X-Tenant-Id: beta">
+          <button class="test-scenario-btn" disabled data-who="dana" data-method="GET" data-path="/tasks/B1" data-header="X-Tenant-Id: beta" data-desc="Dana gửi X-Tenant-Id: beta">
             <span><b>Dana</b> gửi header X-Tenant-Id: beta</span>
             <span class="status-pill pill-403">Kỳ vọng: 403</span>
           </button>
-          <button class="test-scenario-btn" data-who="anonymous" data-method="GET" data-path="/tasks/A1" data-desc="Không gửi Authorization header">
+          <button class="test-scenario-btn" disabled data-who="anonymous" data-method="GET" data-path="/tasks/A1" data-desc="Không gửi Authorization header">
             <span><b>Anonymous</b> (không gửi token) đọc Task A1</span>
             <span class="status-pill pill-401">Kỳ vọng: 401</span>
           </button>
@@ -309,7 +311,7 @@
           <div class="grid-2" style="margin-bottom:8px;">
             <div>
               <label>Người gọi (Người dùng / Token):</label>
-              <select id="req-user">
+              <select id="req-user" disabled>
                 <option value="alice">Alice (Owner Alpha, tenant alpha)</option>
                 <option value="bob">Bob (Member Alpha, tenant alpha)</option>
                 <option value="charlie">Charlie (Owner Beta, tenant beta)</option>
@@ -328,16 +330,20 @@
             </div>
           </div>
 
+          <div id="manual-token-field">
+            <label for="req-token">Bearer token của bạn (để trống để thử Anonymous):</label>
+            <input type="password" id="req-token" autocomplete="off" placeholder="Dán token do hệ thống xác thực cấp">
+          </div>
           <label>Đường dẫn API (Endpoint URL):</label>
           <input type="text" id="req-path" value="/tasks/A1">
 
-          <label>Header tùy chọn (ví dụ: X-Tenant-Id: beta, X-Version: v0):</label>
+          <label>Header tùy chọn (ví dụ: X-Tenant-Id: beta):</label>
           <input type="text" id="req-headers" placeholder="Ví dụ: X-Tenant-Id: beta">
 
           <label>Dữ liệu gửi kèm (Request Body JSON):</label>
           <textarea id="req-body" rows="3" placeholder='{"title": "Tiêu đề mới", "status": "Open"}'></textarea>
 
-          <button class="btn btn-primary" id="btn-send-req" style="width:100%; justify-content:center; margin-top:8px;">
+          <button class="btn btn-primary" id="btn-send-req" disabled style="width:100%; justify-content:center; margin-top:8px;">
             GỬI REQUEST ĐẾN SERVER
           </button>
         </div>
@@ -362,10 +368,10 @@
         <div>
           <div class="card-title" style="margin-bottom:4px;">Test Oracle — 17 ca kiểm thử tự động chuẩn Slide</div>
           <p style="font-size:0.85rem; color:var(--text-muted);">
-            Kiểm thử toàn diện qua HTTP thực tế đến Backend Server cho phiên bản đang kích hoạt.
+            Chạy 17 tình huống của slide qua HTTP cho phiên bản demo đang chọn. Các tình huống này không thay thế toàn bộ bộ test hồi quy.
           </p>
         </div>
-        <button class="btn btn-primary" id="btn-run-all-oracle">CHẠY TOÀN BỘ TEST ORACLE</button>
+        <button class="btn btn-primary" id="btn-run-all-oracle" disabled>CHẠY TOÀN BỘ TEST ORACLE</button>
       </div>
 
       <div id="oracle-summary" style="display:none; padding:12px 16px; border-radius:6px; margin-bottom:16px;"></div>
@@ -464,195 +470,190 @@
   <!-- Tab 4: Minh chứng IDOR -->
   <div id="tab-evidence" class="tab-content">
     <div class="card">
-      <div class="card-title">Bằng chứng tái hiện và khắc phục lỗ hổng IDOR / BOLA</div>
-      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">
-        Đối chiếu kịch bản tấn công: <b>Alice</b> (thuộc Project Alpha) gọi <code>GET /tasks/B1</code> (task nhạy cảm thuộc Project Beta).
+      <div class="card-title">Minh chứng IDOR: cùng một test, đỏ trước và xanh sau</div>
+      <p style="font-size:.85rem; color:var(--text-muted); margin-bottom:16px;">
+        Alice gọi <code>GET /tasks/B1</code>. Cùng một kỳ vọng <code>HTTP 403</code> được giữ nguyên khi chạy trên V0 và V1.
+        Chức năng này dùng dữ liệu demo và khôi phục phiên bản đang chọn sau khi chạy.
       </p>
-
+      <button class="btn btn-primary" id="btn-run-evidence" disabled>CHẠY MINH CHỨNG ĐỎ → XANH</button>
+      <div id="evidence-summary" class="mode-banner" style="margin-top:16px;" role="status">Chưa chạy minh chứng trực tiếp.</div>
       <div class="grid-2">
         <div>
-          <div style="font-weight:700; color:var(--danger); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-            <span class="badge badge-danger">V0: LỖ HỔNG IDOR (Trước khi sửa)</span>
-          </div>
-          <pre class="code"><code>// Request
-GET /tasks/B1 HTTP/1.1
-Host: localhost:3000
-Authorization: Bearer &lt;token-alice&gt;
-
-// Response: 200 OK (Dữ liệu bí mật bị lộ)
-{
-  "id": "B1",
-  "project": "beta",
-  "title": "Ngân sách dự án Beta",
-  "assignee": "charlie",
-  "status": "Open"
-}</code></pre>
-          <div style="background:var(--danger-bg); border:1px solid var(--danger); padding:10px 14px; border-radius:6px; font-size:0.85rem; margin-top:8px;">
-            <b>Hậu quả:</b> Server chỉ kiểm tra token hợp lệ nhưng không kiểm tra quyền của Alice đối với object B1. Alice đọc được toàn bộ ngân sách dự án bí mật của Project Beta.
-          </div>
+          <p style="color:var(--danger); font-weight:700; margin-bottom:8px;">V0 — Trước khi sửa</p>
+          <pre class="code" id="evidence-before">Chạy minh chứng để xem response thực tế.</pre>
         </div>
-
         <div>
-          <div style="font-weight:700; color:var(--success); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-            <span class="badge badge-success">V1+: ĐÃ KHẮC PHỤC (Sau khi sửa)</span>
-          </div>
-          <pre class="code"><code>// Request
-GET /tasks/B1 HTTP/1.1
-Host: localhost:3000
-Authorization: Bearer &lt;token-alice&gt;
-
-// Response: 403 Forbidden (Bị chặn tại Server)
-{
-  "error": "forbidden"
-}</code></pre>
-          <div style="background:var(--success-bg); border:1px solid var(--success); padding:10px 14px; border-radius:6px; font-size:0.85rem; margin-top:8px;">
-            <b>Khắc phục:</b> TaskService kiểm tra quyền sở hữu đối tượng tại Business Layer: Alice không thuộc thành viên Project Beta -&gt; Từ chối ngay lập tức với mã 403. Test cho phép (Alice đọc A1) vẫn đạt 200 OK.
-          </div>
+          <p style="color:var(--success); font-weight:700; margin-bottom:8px;">V1 — Sau khi sửa</p>
+          <pre class="code" id="evidence-after">Chạy minh chứng để xem response thực tế.</pre>
         </div>
       </div>
     </div>
   </div>
-
 </div>
-
 <script>
+  'use strict';
   let tokens = {};
+  let demo = false;
+  let ready = false;
+  let busy = false;
+  let requestNumber = 0;
+  const $ = id => document.getElementById(id);
+  const verSelect = $('server-version-select');
 
-  // Lấy danh sách tokens khi tải trang
-  async function loadTokens() {
-    try {
-      const res = await fetch('/api/tokens');
-      const data = await res.json();
-      tokens = data.tokens;
-    } catch (e) {
-      console.error('Không thể lấy tokens:', e);
-    }
+  function setBusy(value) {
+    busy = value;
+    verSelect.disabled = !ready || !demo || busy;
+    $('btn-reset-db').disabled = !ready || !demo || busy;
+    $('auto-reset-cb').disabled = !ready || !demo || busy;
+    $('req-user').disabled = !ready || !demo || busy;
+    $('btn-run-all-oracle').disabled = !ready || !demo || busy;
+    $('btn-run-evidence').disabled = !ready || !demo || busy;
+    $('btn-send-req').disabled = !ready || busy;
+    document.querySelectorAll('.test-scenario-btn').forEach(button => { button.disabled = !ready || !demo || busy; });
   }
 
-  // Chuyển đổi qua lại giữa các Tabs
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById(btn.dataset.tab).classList.add('active');
+  async function apiJSON(path, options = {}) {
+    const response = await fetch(path, options);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || data.error || ('HTTP ' + response.status));
+    return data;
+  }
+
+  async function initialize() {
+    try {
+      const config = await apiJSON('/api/version');
+      demo = config.demo === true;
+      verSelect.value = config.version;
+      if (demo) tokens = (await apiJSON('/api/tokens')).tokens;
+      $('manual-token-field').hidden = demo;
+      $('auto-reset-cb').checked = demo;
+      $('req-user').value = demo ? 'alice' : 'anonymous';
+      $('mode-banner').textContent = demo
+        ? 'CHẾ ĐỘ DEMO — Dữ liệu giả lập. Có thể chọn người dùng, chuyển V0–V4 và khởi tạo fixture để học và kiểm thử.'
+        : 'API CỐ ĐỊNH ' + config.version.toUpperCase() + ' — Nhập Bearer token để gửi request. Chọn người dùng, đổi phiên bản và reset chỉ có trong bản demo riêng.';
+      document.body.dataset.demo = String(demo);
+      ready = true;
+    } catch (error) {
+      $('mode-banner').textContent = 'Không kết nối được API: ' + error.message;
+      document.body.dataset.error = 'initialization';
+    }
+    setBusy(false);
+    document.body.dataset.ready = String(ready);
+  }
+
+  document.querySelectorAll('.tab-btn').forEach(button => {
+    button.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(tab => tab.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+      button.classList.add('active');
+      $(button.dataset.tab).classList.add('active');
     });
   });
 
-  // Chuyển đổi phiên bản API
-  const verSelect = document.getElementById('server-version-select');
+  async function selectVersion(version) {
+    if (!demo) throw new Error('Chỉ bản demo cho phép đổi phiên bản.');
+    const result = await apiJSON('/api/version', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version })
+    });
+    verSelect.value = result.version;
+  }
+
   verSelect.addEventListener('change', async () => {
-    await fetch('/api/version', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ version: verSelect.value })
+    setBusy(true);
+    try {
+      await selectVersion(verSelect.value);
+      $('mode-banner').textContent = 'CHẾ ĐỘ DEMO — Phiên bản đang chọn: ' + verSelect.value.toUpperCase() + '. Dữ liệu giả lập dùng để so sánh các chính sách.';
+    } catch (error) {
+      $('mode-banner').textContent = 'Không đổi được phiên bản: ' + error.message;
+    } finally { setBusy(false); }
+  });
+
+  async function resetDatabase(fixture) {
+    if (!demo) throw new Error('Chỉ bản demo cho phép khởi tạo fixture.');
+    return apiJSON('/api/test/reset', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fixture: fixture || null })
     });
+  }
+
+  $('btn-reset-db').addEventListener('click', async () => {
+    setBusy(true);
+    try {
+      await resetDatabase();
+      $('mode-banner').textContent = 'CHẾ ĐỘ DEMO — Đã khôi phục dữ liệu mẫu ban đầu.';
+    } catch (error) { $('mode-banner').textContent = error.message; }
+    finally { setBusy(false); }
   });
 
-  // Khởi tạo lại cơ sở dữ liệu
-  document.getElementById('btn-reset-db').addEventListener('click', async () => {
-    const res = await fetch('/api/test/reset', { method: 'POST' });
-    const data = await res.json();
-    alert(data.message);
-  });
-
-  // Thực thi Request
   async function executeRequest(method, path, who, bodyStr, customHeaders = '') {
     const headers = { 'Content-Type': 'application/json' };
-    if (who !== 'anonymous' && tokens[who]) {
-      headers['Authorization'] = 'Bearer ' + tokens[who];
-    }
-    if (customHeaders) {
-      customHeaders.split(',').forEach(h => {
-        const parts = h.split(':');
-        if (parts.length === 2) headers[parts[0].trim()] = parts[1].trim();
-      });
-    }
-
-    const opts = { method, headers };
-    if (['POST', 'PATCH', 'PUT'].includes(method) && bodyStr) {
-      opts.body = bodyStr;
-    }
-
-    const t0 = performance.now();
+    const token = demo ? (who !== 'anonymous' && tokens[who]) : $('req-token').value.trim();
+    if (token) headers.Authorization = 'Bearer ' + token;
+    customHeaders.split(',').filter(Boolean).forEach(header => {
+      const separator = header.indexOf(':');
+      if (separator > 0) headers[header.slice(0, separator).trim()] = header.slice(separator + 1).trim();
+    });
+    const start = performance.now();
     try {
-      const res = await fetch(path, opts);
-      const t1 = performance.now();
-      const status = res.status;
+      const url = new URL(path, location.origin);
+      if (url.origin !== location.origin) throw new Error('Chỉ gửi request đến API cùng địa chỉ trang này.');
+      const options = { method, headers };
+      if (['POST', 'PATCH', 'PUT'].includes(method) && bodyStr) options.body = bodyStr;
+      const response = await fetch(url, options);
+      const responseText = await response.text();
       let bodyData;
-      try { bodyData = await res.json(); } catch (_) { bodyData = await res.text(); }
-
-      return { status, bodyData, duration: Math.round(t1 - t0) };
-    } catch (err) {
-      return { status: 0, bodyData: { error: err.message }, duration: 0 };
+      try { bodyData = JSON.parse(responseText); } catch (_) { bodyData = responseText; }
+      return { status: response.status, bodyData, duration: Math.round(performance.now() - start) };
+    } catch (error) {
+      return { status: 0, bodyData: { error: error.message }, duration: 0 };
     }
   }
 
-  document.getElementById('btn-send-req').addEventListener('click', async () => {
-    const autoReset = document.getElementById('auto-reset-cb')?.checked;
-    if (autoReset) {
-      await fetch('/api/test/reset', { method: 'POST' });
-    }
-
-    const method = document.getElementById('req-method').value;
-    const path = document.getElementById('req-path').value;
-    const who = document.getElementById('req-user').value;
-    const bodyStr = document.getElementById('req-body').value;
-    const customH = document.getElementById('req-headers').value;
-
-    const badge = document.getElementById('res-status-badge');
-    badge.className = 'badge badge-warning';
+  $('btn-send-req').addEventListener('click', async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    const badge = $('res-status-badge');
     badge.textContent = 'ĐANG GỬI...';
-
-    const { status, bodyData, duration } = await executeRequest(method, path, who, bodyStr, customH);
-
-    badge.textContent = status + ' ' + (status === 200 ? 'OK' : status === 401 ? 'UNAUTHORIZED' : status === 403 ? 'FORBIDDEN' : status === 404 ? 'NOT FOUND' : '');
-    badge.className = 'badge ' + (status >= 200 && status < 300 ? 'badge-success' : status === 401 ? 'badge-warning' : 'badge-danger');
-
-    document.getElementById('res-time-meta').textContent = `Thời gian xử lý: ${duration}ms | Mã HTTP ${status}`;
-    document.getElementById('res-body-output').textContent = JSON.stringify(bodyData, null, 2);
-
-    const explBox = document.getElementById('res-explanation');
-    explBox.style.display = 'block';
-
-    if (status === 200) {
-      explBox.style.background = 'var(--success-bg)';
-      explBox.style.border = '1px solid var(--success)';
-      explBox.innerHTML = '<b>Thành công (200 OK):</b> Yêu cầu hợp lệ và người gọi có đầy đủ quyền hạn trên tài nguyên này.';
-    } else if (status === 401) {
-      explBox.style.background = 'var(--warning-bg)';
-      explBox.style.border = '1px solid var(--warning)';
-      explBox.innerHTML = '<b>Từ chối xác thực (401 Unauthorized):</b> Request không có token hoặc token không hợp lệ / đã hết hạn.';
-    } else if (status === 403) {
-      explBox.style.background = 'var(--danger-bg)';
-      explBox.style.border = '1px solid var(--danger)';
-      let reasonText = 'Người gọi không có quyền truy cập đối tượng này.';
-      if (bodyData && bodyData.reason === 'tenant_mismatch') reasonText = 'Vi phạm ranh giới Tenant (người dùng thuộc tenant khác).';
-      else if (bodyData && bodyData.reason === 'not_assignee') reasonText = 'Vi phạm ReBAC: Member chỉ được sửa task được phân công cho chính mình.';
-      else if (bodyData && bodyData.reason === 'task_closed') reasonText = 'Vi phạm ABAC: Task đã đóng (Closed), không được phép chỉnh sửa.';
-      explBox.innerHTML = `<b>Từ chối phân quyền (403 Forbidden):</b> ${reasonText}`;
-    } else if (status === 404) {
-      explBox.style.background = 'rgba(210, 153, 34, 0.15)';
-      explBox.style.border = '1px solid var(--warning)';
-      explBox.innerHTML = `<b>Tài nguyên không tồn tại (404 Not Found):</b><br>
-        - Task hoặc Project không có trong hệ thống, HOẶC Project chứa task này vừa bị xóa bởi lệnh DELETE trước đó.<br>
-        - <b>Giải pháp:</b> Bấm nút <a href="javascript:void(0)" onclick="document.getElementById('btn-reset-db').click()" style="color:var(--primary); font-weight:700; text-decoration:underline;">Khởi tạo lại CSDL</a> để khôi phục dữ liệu mẫu rồi thử lại.`;
+    try {
+      if (demo && $('auto-reset-cb').checked) await resetDatabase();
+      const result = await executeRequest($('req-method').value, $('req-path').value, $('req-user').value, $('req-body').value, $('req-headers').value);
+      const labels = { 200: 'OK', 400: 'BAD REQUEST', 401: 'UNAUTHORIZED', 403: 'FORBIDDEN', 404: 'NOT FOUND' };
+      badge.textContent = result.status + ' ' + (labels[result.status] || '');
+      badge.className = 'badge ' + (result.status === 200 ? 'badge-success' : result.status === 401 ? 'badge-warning' : 'badge-danger');
+      $('res-time-meta').textContent = 'Thời gian xử lý: ' + result.duration + 'ms | Mã HTTP ' + result.status;
+      $('res-body-output').textContent = JSON.stringify(result.bodyData, null, 2);
+      const explanation = $('res-explanation');
+      explanation.style.display = 'block';
+      const descriptions = {
+        200: 'Request được cho phép bởi chính sách phiên bản đang chọn. Ở V0, thành công có thể cho thấy lỗi thiếu kiểm quyền.',
+        400: 'Dữ liệu gửi lên không hợp lệ hoặc chứa trường không được phép cập nhật.',
+        401: 'Thiếu token, token không hợp lệ hoặc đã hết hạn.',
+        403: 'Người gọi không đủ quyền, không đúng assignee/trạng thái, hoặc khác tenant.',
+        404: 'Không tìm thấy tài nguyên hoặc endpoint.'
+      };
+      explanation.textContent = descriptions[result.status] || 'Không gửi được request hoặc server trả lỗi.';
+      badge.dataset.status = String(result.status);
+    } catch (error) {
+      badge.textContent = 'LỖI';
+      badge.dataset.status = '0';
+      $('res-body-output').textContent = error.message;
+    } finally {
+      badge.dataset.requestId = String(++requestNumber);
+      setBusy(false);
     }
   });
 
-  // Chọn nhanh kịch bản kiểm thử
-  document.querySelectorAll('.test-scenario-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.getElementById('req-user').value = btn.dataset.who;
-      document.getElementById('req-method').value = btn.dataset.method;
-      document.getElementById('req-path').value = btn.dataset.path;
-      document.getElementById('req-body').value = btn.dataset.body || '';
-      document.getElementById('req-headers').value = btn.dataset.header || '';
-      document.getElementById('btn-send-req').click();
+  document.querySelectorAll('.test-scenario-btn').forEach(button => {
+    button.addEventListener('click', () => {
+      if (!demo || busy) return;
+      $('req-user').value = button.dataset.who;
+      $('req-method').value = button.dataset.method;
+      $('req-path').value = button.dataset.path;
+      $('req-body').value = button.dataset.body || '';
+      $('req-headers').value = button.dataset.header || '';
+      $('btn-send-req').click();
     });
   });
 
-  // Định nghĩa 17 ca kiểm thử theo đúng Test Oracle của slide
   const ORACLE_TESTS = [
     { v: 1, name: 'Anonymous đọc task A1 (không có token)', who: 'anonymous', m: 'GET', p: '/tasks/A1', exp: 401 },
     { v: 1, name: 'Alice đọc task A1 (cùng project Alpha)', who: 'alice', m: 'GET', p: '/tasks/A1', exp: 200 },
@@ -673,66 +674,86 @@ Authorization: Bearer &lt;token-alice&gt;
     { v: 4, name: 'Admin Alpha đọc task B1 kèm header tenantId=beta', who: 'dana', m: 'GET', p: '/tasks/B1', h: 'X-Tenant-Id: beta', exp: 403 }
   ];
 
-  // Chạy toàn bộ Test Oracle
-  document.getElementById('btn-run-all-oracle').addEventListener('click', async () => {
-    const tbody = document.getElementById('oracle-tbody');
+  $('btn-run-all-oracle').addEventListener('click', async () => {
+    if (!demo || busy) return;
+    setBusy(true);
+    const button = $('btn-run-all-oracle');
+    const tbody = $('oracle-tbody');
+    const summary = $('oracle-summary');
     tbody.innerHTML = '';
-    const btn = document.getElementById('btn-run-all-oracle');
-    btn.disabled = true;
-    btn.textContent = 'ĐANG CHẠY KIỂM THỬ...';
-
-    let passCount = 0;
-    for (let i = 0; i < ORACLE_TESTS.length; i++) {
-      const t = ORACLE_TESTS[i];
-
-      // Độc lập dữ liệu (Data Isolation): Khởi tạo lại CSDL trước mỗi ca kiểm thử, kèm fixture nếu có
-      await fetch('/api/test/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fixture: t.fx || null })
-      });
-
-      const res = await executeRequest(t.m, t.p, t.who, t.b, t.h);
-      const isPass = (t.exp === 200 && res.status >= 200 && res.status < 300) ||
-                     (t.exp === 401 && res.status === 401) ||
-                     (t.exp === 403 && (res.status === 403 || res.status === 404));
-
-      if (isPass) passCount++;
-
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td style="font-family:var(--font-mono); font-weight:700;">${i+1}</td>
-        <td><span class="badge badge-primary">V${t.v}</span></td>
-        <td><b>${t.name}</b></td>
-        <td><code>${t.who}</code></td>
-        <td><code>${t.m} ${t.p}</code></td>
-        <td><span class="status-pill pill-${t.exp}">HTTP ${t.exp}</span></td>
-        <td><span class="status-pill pill-${res.status}">HTTP ${res.status}</span></td>
-        <td style="text-align:center;">
-          ${isPass ? '<span class="badge badge-success">ĐẠT</span>' : '<span class="badge badge-danger">KHÔNG ĐẠT</span>'}
-        </td>
-      `;
-      tbody.appendChild(tr);
-    }
-
-    const summary = document.getElementById('oracle-summary');
     summary.style.display = 'block';
-    if (passCount === ORACLE_TESTS.length) {
-      summary.style.background = 'var(--success-bg)';
-      summary.style.border = '1px solid var(--success)';
-      summary.innerHTML = `<b style="color:var(--success);">XUẤT SẮC:</b> Đã vượt qua <b>${passCount}/${ORACLE_TESTS.length}</b> ca kiểm thử (100% ĐẠT). Toàn bộ logic Phân quyền (Authorization), RBAC, ReBAC, ABAC và Ranh giới Tenant hoạt động chính xác.`;
-    } else {
-      summary.style.background = 'var(--warning-bg)';
-      summary.style.border = '1px solid var(--warning)';
-      summary.innerHTML = `<b style="color:var(--warning);">KẾT QUẢ:</b> Đã vượt qua <b>${passCount}/${ORACLE_TESTS.length}</b> ca kiểm thử cho phiên bản <b>${verSelect.value.toUpperCase()}</b>.`;
+    summary.textContent = 'Đang chạy 17 tình huống qua HTTP...';
+    delete summary.dataset.pass;
+    delete summary.dataset.fail;
+    delete summary.dataset.error;
+    button.textContent = 'ĐANG CHẠY KIỂM THỬ...';
+    let passCount = 0;
+    try {
+      for (const [index, test] of ORACLE_TESTS.entries()) {
+        await resetDatabase(test.fx);
+        const result = await executeRequest(test.m, test.p, test.who, test.b, test.h);
+        const passed = result.status === test.exp;
+        if (passed) passCount++;
+        const row = document.createElement('tr');
+        row.dataset.pass = String(passed);
+        const values = [index + 1, 'V' + test.v, test.name, test.who, test.m + ' ' + test.p, 'HTTP ' + test.exp, 'HTTP ' + result.status, passed ? 'ĐẠT' : 'KHÔNG ĐẠT'];
+        values.forEach((value, column) => {
+          const cell = document.createElement('td');
+          cell.textContent = value;
+          if (column === 7) cell.style.color = passed ? 'var(--success)' : 'var(--danger)';
+          row.appendChild(cell);
+        });
+        tbody.appendChild(row);
+      }
+      summary.dataset.pass = String(passCount);
+      summary.dataset.fail = String(ORACLE_TESTS.length - passCount);
+      summary.textContent = 'Phiên bản ' + verSelect.value.toUpperCase() + ': ' + passCount + '/' + ORACLE_TESTS.length + ' tình huống đạt. Kết quả chỉ áp dụng cho các ca vừa chạy; kiểm tra hồi quy đầy đủ bằng npm test.';
+      summary.style.borderColor = passCount === ORACLE_TESTS.length ? 'var(--success)' : 'var(--danger)';
+    } catch (error) {
+      summary.dataset.error = 'true';
+      summary.textContent = 'Không hoàn tất bộ oracle: ' + error.message;
+    } finally {
+      await resetDatabase().catch(() => {});
+      button.textContent = 'CHẠY LẠI TOÀN BỘ TEST ORACLE';
+      setBusy(false);
     }
-
-    btn.disabled = false;
-    btn.textContent = 'CHẠY LẠI TOÀN BỘ TEST ORACLE';
   });
 
-  loadTokens();
-</script>
+  $('btn-run-evidence').addEventListener('click', async () => {
+    if (!demo || busy) return;
+    const previousVersion = verSelect.value;
+    const summary = $('evidence-summary');
+    setBusy(true);
+    delete summary.dataset.complete;
+    delete summary.dataset.error;
+    summary.textContent = 'Đang gửi cùng request trên V0 và V1...';
+    try {
+      await resetDatabase();
+      await selectVersion('v0');
+      const before = await executeRequest('GET', '/tasks/B1', 'alice');
+      await selectVersion('v1');
+      const after = await executeRequest('GET', '/tasks/B1', 'alice');
+      const alice = await executeRequest('GET', '/tasks/A1', 'alice');
+      const charlie = await executeRequest('GET', '/tasks/B1', 'charlie');
+      const format = result => 'GET /tasks/B1 — token Alice\nKỳ vọng giữ nguyên: HTTP 403\nThực tế: HTTP ' + result.status + '\n\n' + JSON.stringify(result.bodyData, null, 2);
+      $('evidence-before').textContent = format(before);
+      $('evidence-after').textContent = format(after);
+      const red = before.status !== 403 && before.status === 200 && before.bodyData.id === 'B1';
+      const green = after.status === 403 && alice.status === 200 && charlie.status === 200;
+      summary.dataset.red = String(red);
+      summary.dataset.green = String(green);
+      summary.dataset.complete = 'true';
+      summary.textContent = 'Cùng kỳ vọng 403: V0 ' + (red ? 'ĐỎ (nhận 200)' : 'không tái hiện đúng lỗi') + '; V1 ' + (green ? 'XANH (nhận 403)' : 'chưa đạt') + '. Kiểm tra cho phép V1: Alice đọc A1 → ' + alice.status + ', Charlie đọc B1 → ' + charlie.status + '.';
+    } catch (error) {
+      summary.dataset.error = 'true';
+      summary.textContent = 'Không hoàn tất minh chứng: ' + error.message;
+    } finally {
+      try { await selectVersion(previousVersion); } catch (error) { summary.textContent += ' Không khôi phục được phiên bản: ' + error.message; }
+      setBusy(false);
+    }
+  });
 
+  initialize();
+</script>
 </body>
 </html>

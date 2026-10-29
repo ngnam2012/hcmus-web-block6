@@ -1,352 +1,148 @@
-# BÁO CÁO BÀI THỰC HÀNH AUTHORIZATION VÀ ACCESS CONTROL (BLOCK 6)
-**Môn học:** Phát triển ứng dụng Web nâng cao (Advanced Web Development)  
-**Trường:** Đại học Khoa học Tự nhiên — ĐHQG TP.HCM (HCMUS)  
-**Dự án:** Task Management API  
+# Báo cáo bài thực hành Authorization và Access Control — Block 6
 
----
+Đối chiếu phần D và slide “Bài nộp và tự kiểm tra” trong [học liệu Block 6](../slides.html). V1–V3 là yêu cầu chính; V4 là phần mở rộng. Dữ liệu người dùng, project và task đều là fixture giả định của học liệu.
 
-## 1. BẢNG CHÍNH SÁCH QUYỀN (PERMISSION MATRIX)
+## 1. Bảng chính sách quyền
 
-Hệ thống kết hợp mô hình **RBAC (Role-Based Access Control)**, **ReBAC (Relationship-Based Access Control)**, **ABAC (Attribute-Based Access Control)** và **Tenant Isolation (Multi-Tenancy Boundary)** để kiểm soát truy cập tài nguyên.
+| Vai trò | Tài nguyên | Đọc task | Sửa task | Xóa project | Quản lý thành viên | Điều kiện |
+|---|---|---|---|---|---|---|
+| Anonymous | Task / Project | 401 | 401 | 401 | 401 | Thiếu/sai/hết hạn token, subject không còn tồn tại |
+| Viewer | Task / Project | 200 | 403 | 403 | 403 | Membership trong project; V4 cùng tenant |
+| Member | Task / Project | 200 | Có điều kiện | 403 | 403 | V3/V4: task được giao cho mình **và** còn Open; V4 cùng tenant |
+| Owner | Task / Project | 200 | 200 | 200 | 200 | Membership Owner của project; V4 cùng tenant; không phụ thuộc assignee/status |
+| Admin | Task / Project | 200 | 200 | 200 | 200 | V4: chỉ trong tenant của Admin, kiểm tenant trước khi cấp Owner |
+| Non-member / khác tenant | Task / Project | 403 | 403 | 403 | 403 | Không có rule cấp quyền; V4 không có ngoại lệ Admin xuyên tenant |
 
-### 1.1. Bảng ma trận quyền tổng thể
+Resource không tồn tại trả 404. Bài chọn trả 403 cho resource tồn tại nhưng nằm ngoài phạm vi, thay vì che sự tồn tại bằng 404; cả hai cách đều được học liệu cho phép. Payload không hợp lệ trả 400; gỡ/giáng Owner cuối cùng trả 409. Rule, role và action không nhận diện đều bị từ chối.
 
-| Vai trò (Role) | Tài nguyên | Đọc Task (`read`) | Sửa Task (`edit`) | Xóa Project (`delete`) | Quản lý TV (`members`) | Điều kiện bổ sung (Conditions) | Test Case tương ứng trong Test Suite |
-|---|---|:---:|:---:|:---:|:---:|---|---|
-| **Anonymous** *(Chưa đăng nhập)* | Task / Project | ❌ 401 | ❌ 401 | ❌ 401 | ❌ 401 | Thiếu JWT Bearer Token | `Anonymous đọc A1 → 401` |
-| **Viewer** *(Khách xem project)* | Task / Project | ✅ Cho phép | ❌ 403 | ❌ 403 | ❌ 403 | Thuộc cùng project | `Viewer sửa A1 → 403` |
-| **Member** *(Thành viên project)* | Task / Project | ✅ Cho phép | ⚡ Điều kiện | ❌ 403 | ❌ 403 | **ReBAC:** `task.assignee == userId`<br>**ABAC:** `task.status == 'Open'` | - `Bob đọc A1 → 200`<br>- `Bob sửa A1 (assignee, Open) → 200`<br>- `Bob sửa A2 (chưa assign) → 403`<br>- `Bob sửa A1 Closed → 403`<br>- `Bob xóa Alpha → 403`<br>- `Bob quản lý TV → 403` |
-| **Owner** *(Chủ sở hữu project)* | Task / Project | ✅ Cho phép | ✅ Cho phép | ✅ Cho phép | ✅ Cho phép | Toàn quyền trong phạm vi project thuộc về | - `Alice đọc A1 → 200`<br>- `Alice sửa A1 → 200`<br>- `Alice sửa A2 → 200`<br>- `Alice xóa Alpha → 200`<br>- `Alice quản lý TV → 200` |
-| **Admin** *(Dana - Quản trị tenant)* | Task / Project | ✅ Cho phép | ✅ Cho phép | ✅ Cho phép | ✅ Cho phép | **Tenant Boundary (V4):** Chỉ có quyền Owner trong tenant của mình (`user.tenant == project.tenant`) | - `Dana đọc A1 (cùng Alpha) → 200`<br>- `Dana đọc B1 (khác Beta) → 403`<br>- `Dana gửi header tenantId=beta → 403` |
-| **Cross-Tenant / Non-Member** | Task / Project | ❌ 403/404 | ❌ 403 | ❌ 403 | ❌ 403 | Không thuộc project / khác tenant | - `Alice đọc B1 → 403`<br>- `Bob sửa B1 → 403` |
+Mỗi ô có automated test với tên có thể tìm trực tiếp trong `tests/run.js`:
 
-> **Tự kiểm tra:** Mỗi ô của bảng ma trận trên đều có ít nhất một test case automated kiểm thử cụ thể trong bộ test suite.
+| Hàng trong bảng | Test đối chiếu |
+|---|---|
+| Viewer × 4 action | `v2/v3/v4 matrix Viewer.read/edit/delete/members` |
+| Member × 4 action | `v2/v3/v4 matrix Member.read/edit/delete/members` |
+| Owner × 4 action | `v2/v3/v4 matrix Owner.read/edit/delete/members` |
+| Anonymous × 4 action | `HTTP Anonymous GET/PATCH/DELETE/POST ... -> 401` |
+| Admin × 4 action được phép | `v4 Admin own tenant read/edit/delete/members allowed` |
+| Admin / user ngoài phạm vi × 4 action | `v4 dana/alice/charlie/nonmember forbidden scope ...; no mutation` |
+| Điều kiện Member | `v3/v4 Member edit denied: unassigned/assigned_to_other/closed/other_project; no mutation` và các ô Member.edit được phép |
 
----
+36 test ma trận kiểm độc lập đủ 12 ô ở mỗi mốc V2, V3, V4. Test allow kiểm response và thay đổi dữ liệu tương ứng; test deny kiểm DB giữ nguyên. Các test điều kiện bổ sung không được thay thế bằng việc từ chối mọi request.
 
-## 2. AUTOMATED TESTS (BỘ KIỂM THỬ TỰ ĐỘNG)
+## 2. Automated tests
 
-Bộ kiểm thử được xây dựng độc lập, bao quát toàn diện cả **Request được phép (Positive Tests - HTTP 200)** và **Request bị từ chối (Negative Tests - HTTP 401, 403, 404)**.
-
-### 2.1. Lệnh thực thi kiểm thử duy nhất
 ```bash
 cd task-api
-
-# Chạy toàn bộ 39 unit & HTTP integration tests:
+npm ci
 npm test
-
-# Hoặc mở trực tiếp Google Chrome và tự động thao tác E2E toàn diện:
 npm run test:browser
+# Một lệnh chạy toàn bộ:
+npm run test:all
 ```
 
-### 2.2. Minh chứng ảnh chụp E2E Browser Testing
-Toàn bộ quá trình kiểm thử trực tiếp trên trình duyệt đã được chụp ảnh lưu tại thư mục `public/screenshots/`:
-- `01_alice_read_a1_200.png`: Alice đọc hợp lệ Task A1 (HTTP 200 OK).
-- `02_alice_read_b1_403.png`: Alice bị chặn khi đọc Task B1 (HTTP 403 Forbidden - Vá lỗi IDOR).
-- `03_bob_edit_a2_403.png`: Bob bị chặn khi sửa Task A2 chưa được phân công (HTTP 403 Forbidden).
-- `04_dana_forge_tenant_403.png`: Dana bị chặn khi giả mạo header X-Tenant-Id (HTTP 403 Forbidden).
-- `05_test_oracle_17_pass.png`: Bảng kết quả 17/17 Test Oracle chuẩn slide chạy tự động trên trình duyệt đạt 100% PASS.
-- `06_idor_evidence_tab.png`: Giao diện so sánh minh chứng lỗi IDOR trước và sau khi sửa.
-- `07_permission_matrix_tab.png`: Giao diện hiển thị bảng ma trận phân quyền RBAC/ReBAC/ABAC.
+Trong PowerShell có thể dùng `npm.cmd`. Backend test tự mở server trên cổng ngẫu nhiên ở loopback, không dùng server đang mở của người dùng. Mỗi fixture độc lập; server được đóng bằng `finally`. Không gọi `process.exit()` khi còn tài nguyên đang đóng.
 
-### 2.3. Kết quả chạy thực tế (39/39 Tests PASS 100%)
+150 test backend/service/HTTP bao gồm:
+
+- 36 ô RBAC, V1 object-level access và V3/V4 assignee/status.
+- Đủ 17 oracle gốc của học liệu, chạy qua HTTP với V4 và fixture Viewer/Closed tương ứng.
+- Anonymous ở cả bốn endpoint; token sai/hết hạn, principal không tồn tại.
+- Giả mạo `id`, `role`, `tenant`, `tenantId` trong claim/body/header; subject đã verify là nguồn identity duy nhất.
+- Thử hạ policy qua header/query, gọi endpoint version/token/reset ở API mặc định và kiểm tra không thay đổi DB/version.
+- Mass assignment `project`, `id`, `tenant`, role, trường lạ, prototype key; invalid status/title/assignee; xác nhận không có task bị chuyển tenant.
+- Tạo/đổi/gỡ membership thật; cùng JWT mất quyền ngay sau khi thay membership; Admin/tenant hiện tại từ DB ghi đè claim cũ.
+- Kiểm tra status chính xác, response không lộ task khi deny, invariant không mutation; delete cascade; bảo vệ Owner cuối cùng.
+
+Browser E2E có 11 nhóm assertion: kết quả request thực tế, oracle đúng 17 pass/0 fail, IDOR cùng kỳ vọng đỏ→xanh, UI fixed tắt công cụ demo, token nhập tay, chống downgrade và không có JavaScript error. Script tự khởi động hai app riêng, tự tìm Chrome/Edge hoặc nhận `CHROME_PATH`, chạy headless và đóng browser/server. Chỉ lưu ảnh sau khi assertion thành công.
+
+Log chạy cuối và môi trường kiểm chứng được lưu trong [evidence/verification.txt](evidence/verification.txt). Bảy ảnh được tạo lại ở [public/screenshots/](public/screenshots/), bao gồm response cho phép, response từ chối, oracle, bằng chứng IDOR và ma trận quyền.
+
+Ở môi trường Windows hiện tại, lần chạy `test:all` trong sandbox đạt toàn bộ backend nhưng Chrome bị timeout khi khởi động. Lần kiểm tra browser được cho phép chạy ngoài sandbox đã đạt 11/11 nhóm và 17/17 oracle, exit 0. Log giữ lại cả lần bị giới hạn môi trường và lần chạy thành công; không khẳng định đã chạy thành công toàn bộ `test:all` trong sandbox.
+
+## 3. Evidence IDOR: cùng một test đỏ trước, xanh sau
+
+Scenario: Alice là Owner Alpha, gửi token hợp lệ để đọc task B1 thuộc Beta.
+
+Request giữ nguyên:
+
+```http
+GET /tasks/B1
+Authorization: Bearer <Alice token>
+```
+
+Assertion trong `tests/idor-regression.js` giữ nguyên ở cả hai phiên bản:
+
+```js
+assert.equal(response.status, 403);
+assert.equal(response.body.error, 'forbidden');
+assert.equal(response.body.title, undefined);
+```
+
+V0 trả 200 và dữ liệu B1: assertion thất bại (đỏ). V1 kiểm membership trong project của task, trả 403 `{"error":"forbidden"}`: cùng assertion đạt (xanh). Positive controls Alice→A1 và Charlie→B1 đều trả 200.
+
+```bash
+npm run test:idor
+# Chạy từng mốc để thấy exit code thật:
+npm run test:idor -- --version=v0   # expected exit 1: red
+npm run test:idor -- --version=v1   # exit 0: green
+```
+
+Lệnh không tham số kiểm chứng V0 bắt buộc thất bại với đúng AssertionError, V1 bắt buộc đạt, rồi chạy hai positive controls; toàn bộ quy trình đúng thì exit 0. Đây cũng là một test trong `npm test`. Response và log thực tế ở [evidence/idor-red-green.txt](evidence/idor-red-green.txt). Giao diện demo có nút chạy lại minh chứng qua HTTP và khôi phục version ban đầu sau khi xong; ảnh [06_idor_evidence_tab.png](public/screenshots/06_idor_evidence_tab.png).
+
+## 4. Code diff và nơi áp dụng authorization
+
+Code diff thực tế của các file server/business/auth nằm trong [evidence/authorization.patch](evidence/authorization.patch).
+
 ```text
-╔════════════════════════════════════════════════════════════════════════╗
-║   TASK MANAGEMENT API — KIỂM THỬ TỰ ĐỘNG AUTHORIZATION (BLOCK 6)    ║
-╚════════════════════════════════════════════════════════════════════════╝
-
-══ 1. V1 — Kiểm thành viên project khi đọc (Sửa IDOR/BOLA) ══
-  ✓ Anonymous đọc A1 (không có token) → 401 → HTTP 401
-  ✓ Alice đọc A1 (cùng project Alpha) → 200 → HTTP 200
-  ✓ Alice đọc B1 (project Beta — Alice không là thành viên) → 403 → HTTP 403
-  ✓ Charlie đọc B1 (Owner Beta) → 200 → HTTP 200
-  ✓ Bob đọc A1 (Member Alpha) → 200 → HTTP 200
-  ✓ Bob đọc B1 (không thuộc Beta) → 403 → HTTP 403
-
-══ 2. V2 — RBAC theo Project (Role từ bảng thành viên, không tin client) ══
-  ✓ Viewer sửa A1 → 403 → HTTP 403
-  ✓ Member (Bob) xóa project Alpha → 403 → HTTP 403
-  ✓ Member (Bob) quản lý thành viên → 403 → HTTP 403
-  ✓ Owner (Alice) xóa project Alpha → 200 → HTTP 200
-  ✓ Owner (Alice) quản lý thành viên → 200 → HTTP 200
-  ✓ Bob tự khai admin nhưng service không tin client → 403 → HTTP 403
-  ✓ Admin Dana xóa project Alpha (V2: global admin chưa có tenant check) → 200 → HTTP 200
-
-══ 3. V3 — ReBAC + ABAC (Member chỉ sửa task được giao và còn Open) ══
-  ✓ Member Bob sửa A1 (được giao cho Bob, còn Open) → 200 → HTTP 200
-  ✓ Member Bob sửa A2 (chưa được giao cho Bob) → 403 → HTTP 403
-  ✓ Member Bob sửa A1 đã Closed → 403 → HTTP 403
-  ✓ Member Bob sửa B1 (thuộc project Beta khác) → 403 → HTTP 403
-  ✓ Owner Alice sửa A1 → 200 → HTTP 200
-  ✓ Owner Alice sửa A2 (chưa giao) → 200 → HTTP 200
-
-══ 4. V4 — Tenant Boundary (Cô lập dữ liệu giữa các tổ chức) ══
-  ✓ Admin Dana (tenant alpha) đọc A1 (cùng tenant) → 200 → HTTP 200
-  ✓ Admin Dana đọc B1 (tenant beta khác) → 403 → HTTP 403
-  ✓ Admin Dana cố đọc B1 dù khai tenantId=beta → 403 → HTTP 403
-  ✓ Alice (Alpha) đọc A1 → 200 → HTTP 200
-  ✓ Alice đọc B1 (Tenant Beta) → 403 → HTTP 403
-  ✓ Charlie (tenant beta, Owner) đọc B1 → 200 → HTTP 200
-
-══ 5. Minh chứng IDOR: V0 (Lộ dữ liệu) vs V1 (Khắc phục) ══
-  ✓ V0: Alice đọc B1 → 200 (LỖI IDOR: Dữ liệu B1 của Beta bị lộ) → HTTP 200
-  ✓ V1: Alice đọc B1 → 403 (Đã vá lỗ hổng IDOR) → HTTP 403
-  ✓ V1: Alice đọc A1 (Test cho phép vẫn thành công) → 200 → HTTP 200
-
-══ 6. Ngữ nghĩa HTTP Codes (401, 403, 404) ══
-  ✓ GET /tasks/Z99 (Resource không tồn tại) → 404 → HTTP 404
-  ✓ Bob (Member) xóa Project Alpha → 403 → HTTP 403
-  ✓ Bob sửa A1 khi đã Closed → 403 → HTTP 403
-
-══ 7. HTTP Integration Tests (Thực tế qua Express Server) ══
-  ✓ HTTP: Request không có header Authorization → 401 → HTTP 401
-  ✓ HTTP: Request với token không hợp lệ → 401 → HTTP 401
-  ✓ HTTP [V0]: Alice đọc B1 (Bị lộ dữ liệu IDOR) → 200 → HTTP 200
-  ✓ HTTP [V1]: Alice đọc B1 (Đã chặn IDOR) → 403 → HTTP 403
-  ✓ HTTP [V1]: Alice đọc A1 (Hợp lệ) → 200 → HTTP 200
-  ✓ HTTP: Bob gửi body {role: "Admin"} để xóa project → 403 → HTTP 403
-  ✓ HTTP: Dana gửi header X-Tenant-Id: beta để đọc B1 → 403 → HTTP 403
-  ✓ HTTP: Đọc task không tồn tại Z99 → 404 → HTTP 404
-
-────────────────────────────────────────────────────────────
-🎉 XUẤT SẮC: TẤT CẢ 39 TESTS ĐỀU VƯỢT QUA (100% PASS)!
-   Bao gồm 31 unit tests logic + 8 integration tests HTTP thực tế.
-────────────────────────────────────────────────────────────
+HTTP route
+  -> authenticate (verify JWT HS256; identity = sub)
+  -> kiểm user còn tồn tại trong DB
+  -> TaskService operation (PEP)
+  -> authorize(version, db, userId, action, resourceId) (PDP chung)
+  -> tenant / project role / action / assignee / status
+  -> validation trước mutation
+  -> đọc hoặc thay đổi dữ liệu
 ```
 
----
+Tất cả bốn business entry point (`getTask`, `editTask`, `deleteProject`, `manageMembers`) gọi cùng `authorize`. Gọi service trực tiếp cũng không bỏ qua policy. `canByRole` dùng ma trận chung và chỉ nhận own property; không cấp quyền qua prototype hoặc role lạ.
 
-## 3. EVIDENCE IDOR (BẰNG CHỨNG TÁI HIỆN VÀ KHẮC PHỤC LỖ HỔNG)
+Các thay đổi chính:
 
-### 3.1. Kịch bản tấn công IDOR / BOLA
-- **Alice** (chỉ là Owner của Project Alpha, Tenant Alpha) gửi request đọc task `B1` (thuộc Project Beta, Tenant Beta).
-- Token JWT gửi kèm là token hoàn toàn hợp lệ của Alice.
-
-### 3.2. Response trước khi sửa (V0 — Starter)
-Request được gửi đến API server chạy phiên bản `v0`:
-```http
-GET /tasks/B1 HTTP/1.1
-Host: localhost:3000
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... (Token Alice)
-```
-
-**Response trả về (Lộ dữ liệu nhạy cảm):**
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json; charset=utf-8
-
-{
-  "id": "B1",
-  "project": "beta",
-  "title": "Ngân sách dự án Beta",
-  "assignee": "charlie",
-  "status": "Open"
-}
-```
-> **Đánh giá:** Server chỉ xác thực danh tính (token hợp lệ) mà **không kiểm tra quyền đối với đối tượng (Object-level Authorization)**. Alice đã xem trộm được thông tin ngân sách dự án bí mật của Beta!
-
-### 3.3. Response sau khi sửa (V1 — TaskService)
-Cùng một request gửi đến API server chạy phiên bản `v1`:
-```http
-GET /tasks/B1 HTTP/1.1
-Host: localhost:3000
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... (Token Alice)
-```
-
-**Response trả về (Đã bị chặn):**
-```http
-HTTP/1.1 403 Forbidden
-Content-Type: application/json; charset=utf-8
-
-{
-  "error": "forbidden"
-}
-```
-
-### 3.4. Quy trình kiểm thử: Đỏ $\rightarrow$ Xanh
-- **Khi chạy test chặn IDOR trên V0:**
-  - Kỳ vọng: `HTTP 403`
-  - Thực tế nhận: `HTTP 200`
-  - Kết quả: **TEST ĐỎ (FAIL)** $\rightarrow$ Chứng minh test case bắt đúng lỗ hổng.
-- **Khi áp dụng bản sửa V1:**
-  - Chạy lại test `Alice đọc B1`: Kết quả **TEST XANH (PASS - 403)**.
-  - Chạy test cho phép `Alice đọc A1`: Kết quả **TEST XANH (PASS - 200)**.
-  - Chạy test cho phép `Charlie đọc B1`: Kết quả **TEST XANH (PASS - 200)**.
-> **Lưu ý:** Tuyệt đối không dùng lối tắt "từ chối toàn bộ request" (deny all), vì cách làm đó sẽ khiến các test cho phép hợp lệ (Alice đọc A1, Charlie đọc B1) bị chuyển sang ĐỎ. Bản sửa V1 đảm bảo cả test từ chối lẫn test cho phép đều XANH.
-
----
-
-## 4. CODE DIFF VÀ VỊ TRÍ KIỂM QUYỀN (PEP / PDP)
-
-### 4.1. Kiến trúc PEP (Policy Enforcement Point) và PDP (Policy Decision Point)
-Toàn bộ logic kiểm soát quyền được đặt tập trung tại **Business Layer** (`src/taskService.js`), không đặt phân tán tại Express Controllers. Mọi route (`server.js`) chỉ đóng vai trò nhận request và chuyển vào `taskService` làm điểm kiểm tra duy nhất:
-
-```
-Client Request
-      │
-      ▼
-┌────────────────────────┐
-│ Express Router         │ 
-│ (HTTP Entry Points)    │
-└──────────┬─────────────┘
-           │
-           ▼
-┌────────────────────────┐
-│ Authentication MW      │ ──[ Thiếu/sai Token ]──► Trả về 401
-│ (auth.js: JWT Verify)  │
-└──────────┬─────────────┘
-           │ req.user = { id: sub }
-           ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Business Layer: TaskService (PEP & PDP Duy Nhất)            │
-│                                                             │
-│  [Lớp 1] Multi-Tenant Boundary: user.tenant == proj.tenant? │
-│  [Lớp 2] Project Membership & RBAC Role Resolution          │
-│  [Lớp 3] Action Permission: canByRole(role, action)?        │
-│  [Lớp 4] ReBAC & ABAC: assignee == user && status == Open?  │
-└──────────┬──────────────────────────────────────────────────┘
-           │
-     ┌─────┴───────────────┐
-     ▼                     ▼
-Cho phép: 200 OK      Từ chối: 403 Forbidden
-```
-
-### 4.2. Code Diff qua các phiên bản tiến hóa
-
-#### Diff 1: Từ V0 (Starter lỗi) $\rightarrow$ V1 (Vá IDOR Đọc)
-```diff
---- a/src/taskService.js (v0)
-+++ b/src/taskService.js (v1)
-@@ -1,7 +1,13 @@
-   getTask(db, userId, taskId) {
-     const task = db.tasks[taskId];
-     if (!task) return { status: 404, body: { error: 'not_found' } };
--    // ❌ Không kiểm tra quyền object
-+
-+    const project = db.projects[task.project];
-+    const member  = project && project.members[userId];
-+
-+    // ✅ Kiểm tra người gọi có là thành viên của project chứa task không
-+    if (!member) return { status: 403, body: { error: 'forbidden' } };
-+
-     return { status: 200, body: { id: taskId, ...task } };
-   }
-```
-
-#### Diff 2: Từ V1 $\rightarrow$ V2 (RBAC theo Project)
-```diff
---- a/src/taskService.js (v1)
-+++ b/src/taskService.js (v2)
-@@ -1,10 +1,24 @@
-+  _resolveRole(db, userId, project) {
-+    const user = BASE.users[userId];
-+    if (!user) return null;
-+    if (user.admin) return 'Owner'; // Admin global
-+    // ✅ Lấy role từ DB hệ thống, TUYỆT ĐỐI không tin role client gửi trong body
-+    return project.members[userId] || null;
-+  },
-+
-   deleteProject(db, userId, projectId) {
-     const project = getProject(db, projectId);
-     if (!project) return { status: 404, body: { error: 'not_found' } };
--    // ⚠️ Chưa kiểm quyền xóa project
-+
-+    const role = this._resolveRole(db, userId, project);
-+    if (!canByRole(role, 'delete'))
-+      return { status: 403, body: { error: 'forbidden' } };
-+
-     delete db.projects[projectId];
-     return { status: 200, body: { ok: true } };
-   }
-```
-
-#### Diff 3: Từ V2 $\rightarrow$ V3 (ReBAC + ABAC: Thu hẹp quyền sửa của Member)
-```diff
---- a/src/taskService.js (v2)
-+++ b/src/taskService.js (v3)
-@@ -5,6 +5,14 @@
-     const role = this._resolveRole(db, userId, project);
-     if (!canByRole(role, 'edit'))
-       return { status: 403, body: { error: 'forbidden' } };
- 
-+    // ✅ Bổ sung ReBAC & ABAC cho Member
-+    if (role === 'Member') {
-+      // ReBAC: Task phải được phân công cho chính người gọi
-+      if (task.assignee !== userId)
-+        return { status: 403, body: { error: 'forbidden', reason: 'not_assignee' } };
-+      // ABAC: Trạng thái task phải còn đang mở (Open)
-+      if (task.status !== 'Open')
-+        return { status: 403, body: { error: 'forbidden', reason: 'task_closed' } };
-+    }
-+
-     Object.assign(task, data);
-     return { status: 200, body: { ok: true } };
-   }
-```
-
-#### Diff 4: Từ V3 $\rightarrow$ V4 (Tenant Boundary: Cô lập Tenant)
-```diff
---- a/src/taskService.js (v3)
-+++ b/src/taskService.js (v4)
-@@ -1,6 +1,18 @@
-+  _checkTenant(userId, project) {
-+    const user = BASE.users[userId];
-+    if (!user || !project) return false;
-+    // ✅ Tenant lấy từ DB xác thực, KHÔNG lấy từ header X-Tenant-Id
-+    return user.tenant === project.tenant;
-+  },
-+
-   getTask(db, userId, taskId) {
-     const task = db.tasks[taskId];
-     if (!task) return { status: 404, body: { error: 'not_found' } };
- 
-     const project = db.projects[task.project];
-+    // ✅ Kiểm tra ranh giới tenant trước khi xét quyền project
-+    if (!this._checkTenant(userId, project)) {
-+      return { status: 403, body: { error: 'forbidden', reason: 'tenant_mismatch' } };
-+    }
-```
-
----
-
-## 5. GIẢI THÍCH LỰA CHỌN MÔ HÌNH VÀ CÁC GIỚI HẠN
-
-### 5.1. Lý do chọn mô hình kết hợp (RBAC + ReBAC + ABAC)
-
-| Mô hình | Lý do áp dụng & Đánh giá |
+| Vị trí | Hành vi sau sửa |
 |---|---|
-| **Tại sao không dùng ACL thuần túy?** | ACL (Access Control List) gán trực tiếp danh sách user vào từng task/project. Khi hệ thống có hàng ngàn dự án và hàng triệu task, số lượng bản ghi quyền bùng nổ theo cấp số nhân ($O(Users \times Objects)$), gây khó khăn nghiêm trọng khi thu hồi quyền hoặc thay đổi nhân sự. |
-| **Tại sao cần RBAC (Role-Based)?** | RBAC phân tách người dùng qua vai trò trừu tượng (`Viewer`, `Member`, `Owner`). Khi một nhân viên tham gia dự án, chỉ cần gán 1 vai trò duy nhất, hệ thống tự động kế thừa ma trận quyền tương ứng. |
-| **Tại sao RBAC là chưa đủ mà cần ReBAC & ABAC?** | RBAC chỉ trả lời câu hỏi ở mức danh mục: *"Member có được sửa task không?"* (Có). Nhưng nó không thể trả lời các câu hỏi phụ thuộc ngữ cảnh động: *"Member này có phải người thực hiện task này không?"* (**ReBAC - Quan hệ quan hệ sở hữu**) và *"Task này đã kết thúc chưa?"* (**ABAC - Thuộc tính trạng thái**). Kết hợp ReBAC và ABAC giúp thực hiện nguyên tắc **Đặc quyền tối thiểu (Least Privilege)** mà không làm phức tạp hóa ma trận RBAC. |
-| **Tại sao cần Tenant Boundary?** | Trong các ứng dụng SaaS B2B, Admin của Tenant này (ví dụ: công ty Alpha) tuyệt đối không được có quyền xem hoặc sửa dữ liệu của Tenant khác (công ty Beta). Tenant ID phải được gắn chặt với Identity đã xác thực ở tầng cơ sở dữ liệu thay vì tin vào Header client gửi lên. |
+| `src/taskService.js` | Policy dùng chung; V1 membership, V2 RBAC, V3 assignee/status, V4 tenant trước Admin |
+| `src/taskService.js` | PATCH chỉ nhận title/status/assignee; project bất biến; assignee hợp lệ cùng project/tenant |
+| `src/taskService.js` | Membership thay đổi thật; không gán Admin bằng project role; delete cascade |
+| `src/auth.js` | Identity chỉ từ subject đã verify; claim `id` không được ghi đè subject |
+| `src/server.js` | Mặc định V4 cố định; không nhận policy từ header/query; helper demo chỉ đăng ký khi bật demo ở lúc tạo app |
+| `src/server.js` | Không có `/api/db` ở cả hai chế độ; app/DB/config độc lập cho từng instance |
 
-### 5.2. Các giới hạn và trường hợp biên chưa kiểm tra trong bài tập
+`GET /health` và `GET /api/version` công khai chỉ chứa metadata, không có dữ liệu resource/token. API mặc định không đăng ký POST version, token hàng loạt hoặc reset. Demo chỉ bind loopback và cố ý cho chọn V0–V4/fixture trên dữ liệu mẫu để giảng dạy; nó là môi trường so sánh riêng, không được coi là API đã bảo vệ. Đổi phiên bản demo không ảnh hưởng instance mặc định.
 
-1. **Vấn đề Cache Invalidation & Thu hồi quyền tức thì (Session Revocation):**
-   - Hiện tại hệ thống dùng JWT stateless. Nếu một user bị xóa khỏi project hoặc giáng chức từ Owner xuống Viewer, token JWT của họ vẫn có hiệu lực cho đến khi hết hạn (`exp = 1h`).
-   - *Hướng giải quyết thực tế:* Sử dụng short-lived access tokens (ví dụ: 5-15 phút) kết hợp token revocation list (Redis blacklist) hoặc kiểm tra version của user profile tại PDP.
-2. **Lọc dữ liệu danh sách ở tầng Database (Query-level Authorization):**
-   - Bài thực hành tập trung vào endpoint kiểm tra đơn lẻ: `GET /tasks/:id`.
-   - Với các API lấy danh sách (`GET /tasks` hoặc phân trang/tìm kiếm), không thể đọc toàn bộ dữ liệu từ database lên bộ nhớ rồi lọc từng phần tử (gây cạn kiệt RAM và nghẽn CPU). Cần đẩy điều kiện quyền xuống câu lệnh truy vấn cơ sở dữ liệu (ví dụ: `WHERE project_id IN (SELECT project_id FROM project_members WHERE user_id = :userId)`).
-3. **Phân quyền ủy quyền của Bên thứ ba (OAuth2 Scopes):**
-   - Chưa kiểm tra trường hợp client bên thứ ba gọi API thay mặt người dùng với phạm vi quyền bị giới hạn (Token Scope, ví dụ: `tasks:read` chỉ được đọc, không được xóa).
+## 5. Giải thích lựa chọn và giới hạn
 
----
+- **RBAC** phù hợp vì quyền đọc/sửa/xóa/quản lý thành viên ổn định theo Viewer, Member, Owner. Membership được lưu theo project, không phải role toàn cục do client khai.
+- **ReBAC** mô tả quan hệ Member với task qua assignee; **ABAC** kiểm thuộc tính trạng thái Open. Cả hai thu hẹp ô Member.edit, thay vì tạo thêm nhiều role.
+- **Tenant boundary** ngăn truy cập xuyên tổ chức, kể cả Admin. User/tenant/admin được tra từ DB hiện tại trước mỗi quyết định, không tin header hoặc claim role/tenant.
+- **ACL** có thể phù hợp nếu cần chia sẻ trực tiếp từng task cho từng user. Bài không có yêu cầu đó, nên membership theo project đơn giản hơn. Số bản ghi ACL tệ nhất có thể tăng theo tích Users × Objects; đây không phải độ phức tạp hàm mũ.
+- **Deny by default** áp dụng cho user/role/action không hợp lệ hoặc ngoài phạm vi; các positive controls bảo đảm bản sửa không trở thành deny-all.
 
-## 6. HƯỚNG DẪN TRẢI NGHIỆM E2E TRÊN TRÌNH DUYỆT (BROWSER DASHBOARD)
+Thu hồi quyền project có hiệu lực ngay khi membership đổi vì policy đọc DB mỗi lần, dù JWT identity chưa hết hạn. Token vẫn còn hợp lệ để xác định người dùng không có nghĩa quyền cũ còn tồn tại. Test đã kiểm cùng JWT trước/sau giáng role và gỡ membership. Xóa user khỏi DB làm request tiếp theo trả 401.
 
-Dự án đã tích hợp sẵn một **Interactive E2E Web Dashboard** trực quan:
+Các giới hạn chưa triển khai/kiểm chứng:
 
-1. Khởi động server:
-   ```bash
-   npm start
-   ```
-2. Mở trình duyệt tại địa chỉ:
-   ```text
-   http://localhost:3000
-   ```
-3. Các tính năng tương tác trực tiếp trên giao diện:
-   - **Chuyển đổi tức thì giữa các phiên bản (V0 $\rightarrow$ V4)** để so sánh hành vi.
-   - **Gửi request 1-click** với các vai trò Alice, Bob, Charlie, Dana hoặc Anonymous.
-   - **Bấm "CHẠY TOÀN BỘ TEST ORACLE"**: Toàn bộ 17 test case chuẩn slide sẽ được thực thi tuần tự qua HTTP fetch thật và hiển thị kết quả trực quan ngay trên trình duyệt.
+1. DB trong bộ nhớ, không persistence; chưa kiểm transaction, cạnh tranh giữa kiểm quyền và ghi dữ liệu, hoặc tải phân tán.
+2. Chưa có list/search/bulk/export/background job. Khi thêm entry point phải dùng cùng policy; API danh sách cần lọc theo quyền ở tầng truy vấn.
+3. Không xây lại login/JWT/OAuth2 theo phạm vi học liệu. Chưa triển khai OAuth2 scope, refresh/revocation token theo phiên, issuer/audience hoặc quản lý secret cho triển khai thực tế; `JWT_SECRET` hỗ trợ cấu hình secret và giá trị mặc định chỉ phục vụ bài tập local.
+4. Không cache quyền, nên chưa có kiểm thử TTL/cache invalidation. Chưa có audit log, performance/load test hay kiểm thử chống truy cập mạng vào demo ngoài thiết kế bind loopback.
+5. Browser test đã chạy trên Chrome/Windows hiện có; nhánh phát hiện Edge/Linux/macOS chưa được kiểm chứng tại môi trường này.
 
+## Đối chiếu bài nộp
+
+| Yêu cầu phần D | Thành phần đáp ứng |
+|---|---|
+| Bảng role/resource/action + assignee/status/tenant; mỗi ô có test | Mục 1 và 36 matrix tests + Anonymous/Admin/scope tests |
+| Automated allow/deny, chạy một lệnh | `npm test`; `npm run test:all` bao gồm browser |
+| Response IDOR trước sửa + cùng test đỏ→xanh | Mục 3, regression harness, log và ảnh evidence |
+| Code diff, các entry point chung kiểm quyền | Mục 4, `authorize`, patch thực tế |
+| Lý do mô hình + trường hợp chưa kiểm tra | Mục 5 |

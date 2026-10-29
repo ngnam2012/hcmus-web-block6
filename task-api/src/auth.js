@@ -15,7 +15,7 @@ const SECRET = process.env.JWT_SECRET || 'dev-secret-key';
  * @param {object} extra  - payload tuỳ thêm (scope, …)
  */
 function signToken(userId, extra = {}) {
-  return jwt.sign({ sub: userId, ...extra }, SECRET, { expiresIn: '1h' });
+  return jwt.sign({ ...extra, sub: userId }, SECRET, { expiresIn: '1h' });
 }
 
 /**
@@ -31,8 +31,13 @@ function authenticate(req, res, next) {
   }
 
   try {
-    const payload = jwt.verify(token, SECRET);
-    req.user = { id: payload.sub, ...payload };
+    const payload = jwt.verify(token, SECRET, { algorithms: ['HS256'] });
+    if (!payload || typeof payload.sub !== 'string' || !payload.sub.trim()) {
+      return res.status(401).json({ error: 'unauthenticated', message: 'Token thiếu subject hợp lệ' });
+    }
+    // Only the verified subject identifies the caller. Roles and tenants are
+    // resolved from current server data by the business authorization policy.
+    req.user = { id: payload.sub };
     next();
   } catch (err) {
     return res.status(401).json({ error: 'unauthenticated', message: 'Token không hợp lệ hoặc hết hạn' });

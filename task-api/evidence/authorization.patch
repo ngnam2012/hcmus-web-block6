@@ -1,0 +1,806 @@
+diff --git a/task-api/src/auth.js b/task-api/src/auth.js
+index 3ab028a..a070f79 100644
+--- a/task-api/src/auth.js
++++ b/task-api/src/auth.js
+@@ -15,7 +15,7 @@ const SECRET = process.env.JWT_SECRET || 'dev-secret-key';
+  * @param {object} extra  - payload tuỳ thêm (scope, …)
+  */
+ function signToken(userId, extra = {}) {
+-  return jwt.sign({ sub: userId, ...extra }, SECRET, { expiresIn: '1h' });
++  return jwt.sign({ ...extra, sub: userId }, SECRET, { expiresIn: '1h' });
+ }
+ 
+ /**
+@@ -31,8 +31,13 @@ function authenticate(req, res, next) {
+   }
+ 
+   try {
+-    const payload = jwt.verify(token, SECRET);
+-    req.user = { id: payload.sub, ...payload };
++    const payload = jwt.verify(token, SECRET, { algorithms: ['HS256'] });
++    if (!payload || typeof payload.sub !== 'string' || !payload.sub.trim()) {
++      return res.status(401).json({ error: 'unauthenticated', message: 'Token thiếu subject hợp lệ' });
++    }
++    // Only the verified subject identifies the caller. Roles and tenants are
++    // resolved from current server data by the business authorization policy.
++    req.user = { id: payload.sub };
+     next();
+   } catch (err) {
+     return res.status(401).json({ error: 'unauthenticated', message: 'Token không hợp lệ hoặc hết hạn' });
+diff --git a/task-api/src/db.js b/task-api/src/db.js
+index 8d5a868..a2e6e13 100644
+--- a/task-api/src/db.js
++++ b/task-api/src/db.js
+@@ -30,7 +30,7 @@ const BASE = {
+   },
+ };
+ 
+-/** Trả về bản sao sâu của DB để mỗi request không chia sẻ dữ liệu */
++/** Bản sao sâu cho mỗi app hoặc fixture test; request cùng app dùng chung DB. */
+ function cloneDB() {
+   return JSON.parse(JSON.stringify(BASE));
+ }
+diff --git a/task-api/src/rbac.js b/task-api/src/rbac.js
+index d795ebd..7f995bc 100644
+--- a/task-api/src/rbac.js
++++ b/task-api/src/rbac.js
+@@ -1,25 +1,18 @@
+-/**
+- * Ma trận quyền RBAC (Role-Based Access Control)
+- * Dùng chung cho V2, V3, V4.
+- *
+- * Cấu trúc: MATRIX[role][action] = true | false
+- */
++﻿/** Project role matrix, shared by V2, V3 and V4. */
++'use strict';
+ 
+-const MATRIX = {
+-  Viewer: { read: true,  edit: false, delete: false, members: false },
+-  Member: { read: true,  edit: true,  delete: false, members: false },
+-  Owner:  { read: true,  edit: true,  delete: true,  members: true  },
+-};
++const MATRIX = Object.freeze({
++  Viewer: Object.freeze({ read: true, edit: false, delete: false, members: false }),
++  Member: Object.freeze({ read: true, edit: true, delete: false, members: false }),
++  Owner: Object.freeze({ read: true, edit: true, delete: true, members: true }),
++});
+ 
+-/**
+- * Kiểm role trong project có action được không.
+- * @param {string} role   - 'Viewer' | 'Member' | 'Owner'
+- * @param {string} action - 'read' | 'edit' | 'delete' | 'members'
+- * @returns {boolean}
+- */
++/** Unknown roles/actions (including inherited Object keys) deny by default. */
+ function canByRole(role, action) {
+-  return !!(MATRIX[role] && MATRIX[role][action]);
++  return typeof role === 'string' && typeof action === 'string' &&
++    Object.prototype.hasOwnProperty.call(MATRIX, role) &&
++    Object.prototype.hasOwnProperty.call(MATRIX[role], action) &&
++    MATRIX[role][action] === true;
+ }
+ 
+ module.exports = { MATRIX, canByRole };
+-
+diff --git a/task-api/src/server.js b/task-api/src/server.js
+index 02ffb92..2078ade 100644
+--- a/task-api/src/server.js
++++ b/task-api/src/server.js
+@@ -1,164 +1,114 @@
+-/**
+- * Task API — Express server
+- *
+- * Chạy mặc định (v4):
+- *   node src/server.js
+- *
+- * Hoặc chạy các phiên bản cụ thể (tương thích đa nền tảng Windows/Linux/macOS):
+- *   node src/server.js v0
+- *   node src/server.js v1
+- *   node src/server.js v2
+- *   node src/server.js v3
+- *   node src/server.js v4
+- */
+-
++/** Task API: fixed V4 by default; historical versions and fixtures require demo mode. */
+ 'use strict';
+ 
+-const path      = require('path');
+-const express   = require('express');
+-const { cloneDB, BASE } = require('./db');
++const path = require('path');
++const express = require('express');
++const { cloneDB } = require('./db');
+ const { authenticate, signToken } = require('./auth');
+-const services  = require('./taskService');
+-
+-// Hỗ trợ truyền version qua tham số dòng lệnh hoặc biến môi trường
+-let activeVersion = (process.argv[2] && process.argv[2].replace(/^--version=/, '')) || process.env.VERSION || 'v4';
+-
+-if (!services[activeVersion]) {
+-  console.error(`Phiên bản không hợp lệ: ${activeVersion}. Vui lòng chọn v0, v1, v2, v3, hoặc v4.`);
+-  process.exit(1);
+-}
+-
+-const app = express();
+-app.use(express.json());
+-
+-// Phục vụ giao diện E2E Dashboard tại thư mục public
+-app.use(express.static(path.join(__dirname, '../public')));
+-
+-// ── In-memory Database ───────────────────────────────────────────────────────
+-let db = cloneDB();
+-
+-/** Helper lấy service theo request (ưu tiên header x-version / query ?version nếu có để test) */
+-function getService(req) {
+-  const reqVer = req.headers['x-version'] || req.query.version;
+-  if (reqVer && services[reqVer]) {
+-    return { service: services[reqVer], version: reqVer };
+-  }
+-  return { service: services[activeVersion], version: activeVersion };
+-}
+-
+-// ── Utility Endpoints ────────────────────────────────────────────────────────
+-
+-app.get('/health', (_req, res) => res.json({ ok: true, version: activeVersion }));
+-
+-app.get('/api/version', (_req, res) => res.json({ version: activeVersion }));
+-
+-app.post('/api/version', (req, res) => {
+-  const v = req.body && req.body.version;
+-  if (v && services[v]) {
+-    activeVersion = v;
+-    return res.json({ ok: true, version: activeVersion });
+-  }
+-  return res.status(400).json({ error: 'invalid_version', allowed: Object.keys(services) });
+-});
+-
+-/** Lấy JWT token cho các người dùng mẫu để kiểm thử */
+-app.get('/api/tokens', (_req, res) => {
+-  const tokens = {};
+-  for (const u of Object.keys(BASE.users)) {
+-    tokens[u] = signToken(u);
++const services = require('./taskService');
++
++const VERSIONS = Object.freeze(['v0', 'v1', 'v2', 'v3', 'v4']);
++const owns = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
++
++/** Each instance owns its configuration and database; HTTP cannot select a service. */
++function createApp({ version = 'v4', demo = false, db: initialDB } = {}) {
++  if (!VERSIONS.includes(version)) throw new Error(`Invalid version: ${version}`);
++  if (typeof demo !== 'boolean') throw new Error('demo must be a boolean');
++  let activeVersion = version;
++  let db = initialDB || cloneDB();
++  const app = express();
++  app.disable('x-powered-by');
++  app.use(express.json({ limit: '16kb' }));
++
++  app.get('/health', (_req, res) => res.json({ ok: true, version: activeVersion, demo }));
++  app.get('/api/version', (_req, res) => res.json({ version: activeVersion, demo }));
++
++  // Teaching controls exist only in an explicitly created demo instance.
++  // There is deliberately no /api/db endpoint in either mode.
++  if (demo) {
++    app.post('/api/version', (req, res) => {
++      const nextVersion = req.body && req.body.version;
++      if (!VERSIONS.includes(nextVersion)) {
++        return res.status(400).json({ error: 'invalid_version', allowed: VERSIONS });
++      }
++      activeVersion = nextVersion;
++      res.json({ ok: true, version: activeVersion, demo });
++    });
++    app.get('/api/tokens', (_req, res) => {
++      const tokens = Object.fromEntries(Object.keys(db.users).map(id => [id, signToken(id)]));
++      res.json({ tokens });
++    });
++    const reset = (req, res) => {
++      const fixture = req.body && req.body.fixture;
++      if (fixture && !['viewer', 'closed'].includes(fixture)) {
++        return res.status(400).json({ error: 'invalid_fixture' });
++      }
++      db = cloneDB();
++      if (fixture === 'viewer') db.projects.alpha.members.bob = 'Viewer';
++      if (fixture === 'closed') db.tasks.A1.status = 'Closed';
++      res.json({ ok: true, message: 'Đã khôi phục dữ liệu mẫu.' });
++    };
++    app.post('/test/reset', reset);
++    app.post('/api/test/reset', reset);
+   }
+-  res.json({ tokens });
+-});
+ 
+-/** Lấy trạng thái hiện tại của cơ sở dữ liệu */
+-app.get('/api/db', (_req, res) => {
+-  res.json({ db, users: BASE.users });
+-});
+-
+-/** Khởi tạo lại cơ sở dữ liệu về trạng thái ban đầu (hỗ trợ nạp fixture kiểm thử) */
+-const resetHandler = (req, res) => {
+-  db = cloneDB();
+-  if (req.body && req.body.fixture) {
+-    if (req.body.fixture === 'viewer') {
+-      db.projects.alpha.members.bob = 'Viewer';
+-    } else if (req.body.fixture === 'closed') {
+-      db.tasks.A1.status = 'Closed';
++  const authenticated = (req, res, next) => authenticate(req, res, () => {
++    if (!owns(db.users, req.user.id)) {
++      return res.status(401).json({ error: 'unauthenticated', message: 'Người dùng không còn tồn tại.' });
+     }
+-  }
+-  res.json({ ok: true, message: 'Khởi tạo lại cơ sở dữ liệu thành công' });
+-};
+-app.post('/test/reset', resetHandler);
+-app.post('/api/test/reset', resetHandler);
+-
+-// ── Tasks Endpoints ──────────────────────────────────────────────────────────
+-
+-/**
+- * GET /tasks/:id
+- * Đọc task theo ID.
+- * Yêu cầu: token hợp lệ.
+- */
+-app.get('/tasks/:id', authenticate, (req, res) => {
+-  const { service } = getService(req);
+-  const result = service.getTask(db, req.user.id, req.params.id);
+-  res.status(result.status).json(result.body);
+-});
+-
+-/**
+- * PATCH /tasks/:id
+- * Sửa task (title, status, assignee).
+- * Yêu cầu: token hợp lệ.
+- */
+-app.patch('/tasks/:id', authenticate, (req, res) => {
+-  const { service } = getService(req);
+-  if (!service.editTask) {
+-    return res.status(501).json({ error: 'not_implemented' });
+-  }
+-  const result = service.editTask(db, req.user.id, req.params.id, req.body);
+-  res.status(result.status).json(result.body);
+-});
+-
+-// ── Projects Endpoints ───────────────────────────────────────────────────────
+-
+-/**
+- * DELETE /projects/:id
+- * Xóa project.
+- */
+-app.delete('/projects/:id', authenticate, (req, res) => {
+-  const { service } = getService(req);
+-  if (!service.deleteProject) {
+-    return res.status(501).json({ error: 'not_implemented' });
+-  }
+-  const result = service.deleteProject(db, req.user.id, req.params.id);
+-  res.status(result.status).json(result.body);
+-});
+-
+-/**
+- * POST /projects/:id/members
+- * Quản lý thành viên project.
+- */
+-app.post('/projects/:id/members', authenticate, (req, res) => {
+-  const { service } = getService(req);
+-  if (!service.manageMembers) {
+-    return res.status(501).json({ error: 'not_implemented' });
+-  }
+-  const result = service.manageMembers(db, req.user.id, req.params.id);
+-  res.status(result.status).json(result.body);
+-});
++    next();
++  });
++  const handle = (method, resourceParam, hasBody = false) => (req, res) => {
++    // x-version and ?version never select this policy.
++    const service = services[activeVersion];
++    const args = [db, req.user.id, req.params[resourceParam]];
++    if (hasBody) args.push(req.body || {});
++    const result = service[method](...args);
++    res.status(result.status).json(result.body);
++  };
++
++  app.get('/tasks/:id', authenticated, handle('getTask', 'id'));
++  app.patch('/tasks/:id', authenticated, handle('editTask', 'id', true));
++  app.delete('/projects/:id', authenticated, handle('deleteProject', 'id'));
++  app.post('/projects/:id/members', authenticated, handle('manageMembers', 'id', true));
++
++  app.use(express.static(path.join(__dirname, '../public')));
++  app.use((_req, res) => res.status(404).json({ error: 'not_found' }));
++  app.use((err, _req, res, _next) => {
++    const status = err.status === 413 ? 413 : err.status === 400 ? 400 : 500;
++    res.status(status).json({ error: status === 500 ? 'internal_error' : 'invalid_request' });
++  });
++  return app;
++}
+ 
+-// ── Khởi động Server ─────────────────────────────────────────────────────────
+-const PORT = process.env.PORT || 3000;
++const app = createApp();
+ 
+-function startServer(port = PORT) {
+-  return new Promise((resolve) => {
+-    const server = app.listen(port, () => {
+-      console.log(`Task API [${activeVersion}] đang chạy tại http://localhost:${port}`);
+-      resolve(server);
+-    });
++/** Both modes bind to loopback. Demo cannot be enabled through an HTTP request. */
++function startServer(port = process.env.PORT || 3000, options = {}) {
++  const instance = options.app || createApp(options);
++  return new Promise((resolve, reject) => {
++    const server = instance.listen(port, '127.0.0.1', () => resolve(server));
++    server.once('error', reject);
+   });
+ }
+ 
+ if (require.main === module) {
+-  startServer();
++  const args = process.argv.slice(2);
++  const demo = args.includes('--demo');
++  const versionArg = args.find(arg => arg.startsWith('--version='));
++  const version = versionArg ? versionArg.slice('--version='.length) : 'v4';
++  const unknown = args.filter(arg => arg !== '--demo' && arg !== versionArg);
++  if (unknown.length || !VERSIONS.includes(version) || (!demo && version !== 'v4')) {
++    console.error('Dùng: node src/server.js [--demo] [--version=v0|v1|v2|v3|v4]. V0–V3 cần --demo.');
++    process.exitCode = 1;
++  } else {
++    startServer(process.env.PORT || 3000, { version, demo }).then(server => {
++      console.log(`Task API [${version}, ${demo ? 'DEMO' : 'fixed'}] http://127.0.0.1:${server.address().port}`);
++    }).catch(error => {
++      console.error(error.message);
++      process.exitCode = 1;
++    });
++  }
+ }
+ 
+-module.exports = { app, startServer, getActiveVersion: () => activeVersion, setActiveVersion: (v) => { activeVersion = v; } };
++module.exports = { app, createApp, startServer, VERSIONS };
+diff --git a/task-api/src/taskService.js b/task-api/src/taskService.js
+index 5c3c6e0..b4668cc 100644
+--- a/task-api/src/taskService.js
++++ b/task-api/src/taskService.js
+@@ -1,311 +1,150 @@
+-/**
+- * TaskService — Business layer chứa toàn bộ logic kiểm quyền (PEP & PDP).
+- *
+- * Theo nguyên tắc từ slide:
+- *  - Đặt kiểm quyền ở business layer (không ở controller) để mọi
+- *    entry point đều đi qua cùng một điểm kiểm.
+- *  - Không tin userId, role, tenantId do client tự khai.
+- *  - Deny by default: nếu không có rule nào cấp quyền thì từ chối.
+- *
+- * ─────────────────────────────────────────────────────────────
+- * Các phiên bản (version) được export ra:
+- *  v0  – Starter: chỉ kiểm token, không kiểm quyền object (Lỗ hổng IDOR/BOLA).
+- *  v1  – Kiểm thành viên project khi đọc task (Sửa IDOR).
+- *  v2  – RBAC: role lấy từ bảng thành viên; Admin toàn cục là Owner mọi project.
+- *  v3  – RBAC + ABAC + ReBAC: Member chỉ sửa task giao cho mình và còn Open.
+- *  v4  – V3 + Tenant boundary: Admin và User bị giới hạn trong tenant của mình.
+- * ─────────────────────────────────────────────────────────────
++﻿/**
++ * TaskService: mọi business entry point dùng chung authorize (PEP/PDP).
++ * V0/V1 giữ các thiếu sót phân quyền có chủ đích để so sánh trong demo.
++ * V2: RBAC project; V3: thêm assignee + Open; V4: thêm tenant boundary.
+  */
+-
+ 'use strict';
+ 
+-const { BASE }     = require('./db');
+-const { canByRole } = require('./rbac');
++const { MATRIX, canByRole } = require('./rbac');
+ 
+-// ── Helpers ──────────────────────────────────────────────────────────────────
++const own = (object, key) => typeof key === 'string' &&
++  object != null && Object.prototype.hasOwnProperty.call(object, key);
++const get = (object, key) => own(object, key) ? object[key] : null;
++const deny = (reason) => ({ status: 403, body: { error: 'forbidden', ...(reason && { reason }) } });
++const invalid = (reason) => ({ status: 400, body: { error: 'invalid_input', reason } });
++const success = () => ({ status: 200, body: { ok: true } });
++const plainObject = value => value != null && typeof value === 'object' &&
++  !Array.isArray(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
+ 
+ /**
+- * Lấy project theo projectId (hoặc null).
++ * Policy Decision Point. Identity, membership, role và tenant chỉ lấy từ DB.
++ * Không dùng role/tenant/userId trong payload để xác định người đang gọi.
++ * Rule không tồn tại hoặc role không hợp lệ luôn bị từ chối.
+  */
+-function getProject(db, projectId) {
+-  return db.projects[projectId] || null;
++function authorize(version, db, userId, action, resourceId) {
++  const user = get(db.users, userId);
++  if (!user) return { status: 401, body: { error: 'unauthenticated' } };
++  if (!['v0', 'v1', 'v2', 'v3', 'v4'].includes(version)) return deny('invalid_policy');
++  if (!['read', 'edit', 'delete', 'members'].includes(action)) return deny('unknown_action');
++
++  const projectAction = action === 'delete' || action === 'members';
++  const resource = get(projectAction ? db.projects : db.tasks, resourceId);
++  const project = projectAction ? resource : resource && get(db.projects, resource.project);
++  if (!resource || !project) return { status: 404, body: { error: 'not_found' } };
++
++  const memberRole = get(project.members, userId);
++  let role = memberRole;
++  // Historical demo: V0 lacks object authorization; V1 fixes only reading.
++  if (version === 'v0' || (version === 'v1' && action !== 'read')) {
++    return { status: 200, resource, project, user, role };
++  }
++  if (version === 'v1') {
++    if (!own(MATRIX, memberRole)) return deny();
++    return { status: 200, resource, project, user, role };
++  }
++
++  // Tenant boundary must run before the Admin shortcut.
++  if (version === 'v4' && user.tenant !== project.tenant) return deny('tenant_mismatch');
++  if (user.admin === true) role = 'Owner';
++  if (!canByRole(role, action)) return deny();
++
++  if ((version === 'v3' || version === 'v4') && action === 'edit' && role === 'Member') {
++    if (resource.assignee !== userId) return deny('not_assignee');
++    if (resource.status !== 'Open') return deny('task_closed');
++  }
++  return { status: 200, resource, project, user, role };
+ }
+ 
+-// ── V0: Starter ──────────────────────────────────────────────────────────────
+-// Lỗi IDOR: chỉ kiểm token, không kiểm quyền trên object.
+-
+-const v0 = {
+-  getTask(db, userId, taskId) {
+-    const task = db.tasks[taskId];
+-    if (!task) return { status: 404, body: { error: 'not_found' } };
+-    // ❌ LỖI IDOR: Không kiểm tra người gọi có thuộc project chứa task không!
+-    return { status: 200, body: { id: taskId, ...task } };
+-  },
+-
+-  editTask(db, userId, taskId, data) {
+-    const task = db.tasks[taskId];
+-    if (!task) return { status: 404, body: { error: 'not_found' } };
+-    Object.assign(task, data);
+-    return { status: 200, body: { ok: true } };
+-  },
+-
+-  deleteProject(db, userId, projectId) {
+-    const project = getProject(db, projectId);
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-    delete db.projects[projectId];
+-    return { status: 200, body: { ok: true } };
+-  },
+-
+-  manageMembers(db, userId, projectId) {
+-    const project = getProject(db, projectId);
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-    return { status: 200, body: { ok: true } };
+-  },
+-};
+-
+-// ── V1: Kiểm thành viên project khi đọc ─────────────────────────────────────
+-
+-const v1 = {
+-  getTask(db, userId, taskId) {
+-    const task    = db.tasks[taskId];
+-    if (!task) return { status: 404, body: { error: 'not_found' } };
+-
+-    const project = db.projects[task.project];
+-    const member  = project && project.members[userId];
+-
+-    // ✅ Kiểm thành viên (sửa IDOR đọc)
+-    if (!member) return { status: 403, body: { error: 'forbidden' } };
+-
+-    return { status: 200, body: { id: taskId, ...task } };
+-  },
+-
+-  editTask(db, userId, taskId, data) {
+-    const task = db.tasks[taskId];
+-    if (!task) return { status: 404, body: { error: 'not_found' } };
+-
+-    // ⚠️ Thao tác ghi chưa được bảo vệ theo role (V1 chỉ fix READ)
+-    Object.assign(task, data);
+-    return { status: 200, body: { ok: true } };
+-  },
+-
+-  deleteProject(db, userId, projectId) {
+-    const project = getProject(db, projectId);
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-
+-    // ⚠️ Chưa kiểm quyền xóa project
+-    delete db.projects[projectId];
+-    return { status: 200, body: { ok: true } };
+-  },
+-
+-  manageMembers(db, userId, projectId) {
+-    const project = getProject(db, projectId);
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-
+-    return { status: 200, body: { ok: true } };
+-  },
+-};
+-
+-// ── V2: RBAC ─────────────────────────────────────────────────────────────────
+-// Role lấy từ bảng thành viên, không tin role do client tự khai.
+-// Admin (global) coi như Owner ở mọi project — nhưng chưa có tenant boundary.
+-
+-const v2 = {
+-  _resolveRole(db, userId, project) {
+-    const user = BASE.users[userId];
+-    if (!user) return null;
+-
+-    // Admin toàn cục → Owner (V2 chưa có tenant boundary)
+-    if (user.admin) return 'Owner';
+-
+-    return project.members[userId] || null;
+-  },
+-
+-  getTask(db, userId, taskId) {
+-    const task    = db.tasks[taskId];
+-    if (!task) return { status: 404, body: { error: 'not_found' } };
+-
+-    const project = db.projects[task.project];
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-
+-    const role = this._resolveRole(db, userId, project);
+-    if (!canByRole(role, 'read'))
+-      return { status: 403, body: { error: 'forbidden' } };
+-
+-    return { status: 200, body: { id: taskId, ...task } };
+-  },
+-
+-  editTask(db, userId, taskId, data) {
+-    const task    = db.tasks[taskId];
+-    if (!task) return { status: 404, body: { error: 'not_found' } };
+-
+-    const project = db.projects[task.project];
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-
+-    const role = this._resolveRole(db, userId, project);
+-    if (!canByRole(role, 'edit'))
+-      return { status: 403, body: { error: 'forbidden' } };
+-
+-    Object.assign(task, data);
+-    return { status: 200, body: { ok: true } };
+-  },
+-
+-  deleteProject(db, userId, projectId) {
+-    const project = getProject(db, projectId);
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-
+-    const role = this._resolveRole(db, userId, project);
+-    if (!canByRole(role, 'delete'))
+-      return { status: 403, body: { error: 'forbidden' } };
+-
+-    delete db.projects[projectId];
+-    return { status: 200, body: { ok: true } };
+-  },
+-
+-  manageMembers(db, userId, projectId) {
+-    const project = getProject(db, projectId);
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-
+-    const role = this._resolveRole(db, userId, project);
+-    if (!canByRole(role, 'members'))
+-      return { status: 403, body: { error: 'forbidden' } };
+-
+-    return { status: 200, body: { ok: true } };
+-  },
+-};
+-
+-// ── V3: RBAC + ABAC + ReBAC ──────────────────────────────────────────────────
+-// Mở rộng V2: Member chỉ sửa task được giao cho mình (ReBAC) VÀ task còn Open (ABAC).
+-
+-const v3 = {
+-  ...v2,
+-
+-  editTask(db, userId, taskId, data) {
+-    const task    = db.tasks[taskId];
+-    if (!task) return { status: 404, body: { error: 'not_found' } };
+-
+-    const project = db.projects[task.project];
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-
+-    const role = v2._resolveRole(db, userId, project);
+-    if (!canByRole(role, 'edit'))
+-      return { status: 403, body: { error: 'forbidden' } };
+-
+-    // ✅ ReBAC + ABAC: Member chỉ sửa task của chính mình khi còn Open
+-    if (role === 'Member') {
+-      if (task.assignee !== userId)
+-        return { status: 403, body: { error: 'forbidden', reason: 'not_assignee' } };
+-      if (task.status !== 'Open')
+-        return { status: 403, body: { error: 'forbidden', reason: 'task_closed' } };
+-    }
+-
+-    Object.assign(task, data);
+-    return { status: 200, body: { ok: true } };
+-  },
+-};
+-
+-// ── V4: V3 + Tenant Boundary ─────────────────────────────────────────────────
+-// Ranh giới Tenant cách ly hoàn toàn dữ liệu giữa các tổ chức.
+-// Admin chỉ có quyền Owner trong tenant của chính họ.
+-// tenantId PHẢI lấy từ DB (không tin header/body client tự khai).
+-
+-const v4 = {
+-  _resolveRole(db, userId, project) {
+-    const user = BASE.users[userId];
+-    if (!user) return null;
+-
+-    // ✅ Admin chỉ là Owner trong cùng tenant
+-    if (user.admin && user.tenant === project.tenant) return 'Owner';
+-
+-    // Thành viên thông thường
+-    return project.members[userId] || null;
+-  },
+-
+-  _checkTenant(userId, project) {
+-    const user = BASE.users[userId];
+-    if (!user || !project) return false;
+-    // Ranh giới tenant: người dùng thuộc tenant nào chỉ truy cập tài nguyên tenant đó
+-    return user.tenant === project.tenant;
+-  },
+-
+-  getTask(db, userId, taskId) {
+-    const task = db.tasks[taskId];
+-    if (!task) return { status: 404, body: { error: 'not_found' } };
+-
+-    const project = db.projects[task.project];
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-
+-    // ✅ Kiểm tra tenant boundary
+-    if (!this._checkTenant(userId, project)) {
+-      return { status: 403, body: { error: 'forbidden', reason: 'tenant_mismatch' } };
+-    }
+-
+-    const role = this._resolveRole(db, userId, project);
+-    if (!canByRole(role, 'read'))
+-      return { status: 403, body: { error: 'forbidden' } };
+-
+-    return { status: 200, body: { id: taskId, ...task } };
+-  },
+-
+-  editTask(db, userId, taskId, data) {
+-    const task = db.tasks[taskId];
+-    if (!task) return { status: 404, body: { error: 'not_found' } };
+-
+-    const project = db.projects[task.project];
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-
+-    // ✅ Kiểm tra tenant boundary
+-    if (!this._checkTenant(userId, project)) {
+-      return { status: 403, body: { error: 'forbidden', reason: 'tenant_mismatch' } };
+-    }
+-
+-    const role = this._resolveRole(db, userId, project);
+-    if (!canByRole(role, 'edit'))
+-      return { status: 403, body: { error: 'forbidden' } };
+-
+-    // ReBAC + ABAC: Member chỉ sửa task của mình khi còn Open
+-    if (role === 'Member') {
+-      if (task.assignee !== userId)
+-        return { status: 403, body: { error: 'forbidden', reason: 'not_assignee' } };
+-      if (task.status !== 'Open')
+-        return { status: 403, body: { error: 'forbidden', reason: 'task_closed' } };
+-    }
+-
+-    Object.assign(task, data);
+-    return { status: 200, body: { ok: true } };
+-  },
+-
+-  deleteProject(db, userId, projectId) {
+-    const project = getProject(db, projectId);
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-
+-    // ✅ Kiểm tra tenant boundary
+-    if (!this._checkTenant(userId, project)) {
+-      return { status: 403, body: { error: 'forbidden', reason: 'tenant_mismatch' } };
+-    }
+-
+-    const role = this._resolveRole(db, userId, project);
+-    if (!canByRole(role, 'delete'))
+-      return { status: 403, body: { error: 'forbidden' } };
+-
+-    delete db.projects[projectId];
+-    return { status: 200, body: { ok: true } };
+-  },
+-
+-  manageMembers(db, userId, projectId) {
+-    const project = getProject(db, projectId);
+-    if (!project) return { status: 404, body: { error: 'not_found' } };
+-
+-    // ✅ Kiểm tra tenant boundary
+-    if (!this._checkTenant(userId, project)) {
+-      return { status: 403, body: { error: 'forbidden', reason: 'tenant_mismatch' } };
++/** Validate before mutation: task.project is immutable, so PATCH cannot move data. */
++function validateTaskPatch(db, project, data) {
++  if (!plainObject(data)) return invalid('expected_object');
++  const allowedFields = ['title', 'status', 'assignee'];
++  if (Object.keys(data).some(key => !allowedFields.includes(key))) return invalid('unsupported_field');
++  if (own(data, 'title') && (typeof data.title !== 'string' ||
++      !data.title.trim() || data.title.length > 500)) return invalid('invalid_title');
++  if (own(data, 'status') && !['Open', 'Closed'].includes(data.status)) return invalid('invalid_status');
++  if (own(data, 'assignee') && data.assignee !== null) {
++    const assignee = get(db.users, data.assignee);
++    const role = get(project.members, data.assignee);
++    if (!assignee || assignee.tenant !== project.tenant || !own(MATRIX, role)) {
++      return invalid('invalid_assignee');
+     }
++  }
++  return null;
++}
+ 
+-    const role = this._resolveRole(db, userId, project);
+-    if (!canByRole(role, 'members'))
+-      return { status: 403, body: { error: 'forbidden' } };
++function validateMemberChange(db, project, data) {
++  if (!plainObject(data)) return invalid('expected_object');
++  if (Object.keys(data).length === 0) return null; // Oracle permission probe.
++  if (Object.keys(data).some(key => !['userId', 'role', 'remove'].includes(key))) {
++    return invalid('unsupported_field');
++  }
++  const target = get(db.users, data.userId);
++  if (!target || target.tenant !== project.tenant) return invalid('invalid_member');
++  if (data.remove === true) {
++    if (own(data, 'role')) return invalid('ambiguous_member_change');
++  } else if (own(data, 'remove') || !own(MATRIX, data.role)) {
++    return invalid('invalid_role');
++  }
++  // Keep at least one project Owner. Admin remains a tenant-level privilege,
++  // and can never be assigned as a project role by the request body.
++  const existingRole = get(project.members, data.userId);
++  if (existingRole === 'Owner' && (data.remove === true || data.role !== 'Owner')) {
++    const owners = Object.values(project.members).filter(role => role === 'Owner').length;
++    if (owners <= 1) return { status: 409, body: { error: 'last_owner' } };
++  }
++  return null;
++}
+ 
+-    return { status: 200, body: { ok: true } };
+-  },
+-};
++function createService(version) {
++  return Object.freeze({
++    getTask(db, userId, taskId) {
++      const decision = authorize(version, db, userId, 'read', taskId);
++      if (decision.status !== 200) return decision;
++      return { status: 200, body: { id: taskId, ...decision.resource } };
++    },
++
++    editTask(db, userId, taskId, data = {}) {
++      const decision = authorize(version, db, userId, 'edit', taskId);
++      if (decision.status !== 200) return decision;
++      const error = validateTaskPatch(db, decision.project, data);
++      if (error) return error;
++      // Explicit assignment prevents arbitrary properties or prototype setters.
++      for (const field of ['title', 'status', 'assignee']) {
++        if (own(data, field)) decision.resource[field] = data[field];
++      }
++      return success();
++    },
++
++    deleteProject(db, userId, projectId) {
++      const decision = authorize(version, db, userId, 'delete', projectId);
++      if (decision.status !== 200) return decision;
++      for (const [taskId, task] of Object.entries(db.tasks)) {
++        if (task.project === projectId) delete db.tasks[taskId];
++      }
++      delete db.projects[projectId];
++      return success();
++    },
++
++    manageMembers(db, userId, projectId, data = {}) {
++      const decision = authorize(version, db, userId, 'members', projectId);
++      if (decision.status !== 200) return decision;
++      const error = validateMemberChange(db, decision.project, data);
++      if (error) return error;
++      if (Object.keys(data).length === 0) return success();
++      if (data.remove === true) {
++        delete decision.project.members[data.userId];
++        for (const task of Object.values(db.tasks)) {
++          if (task.project === projectId && task.assignee === data.userId) task.assignee = null;
++        }
++      } else {
++        decision.project.members[data.userId] = data.role;
++      }
++      return success();
++    },
++  });
++}
+ 
+-module.exports = { v0, v1, v2, v3, v4 };
++module.exports = Object.fromEntries(['v0', 'v1', 'v2', 'v3', 'v4'].map(v => [v, createService(v)]));
++// Keep policy inspection available to tests without adding a selectable version.
++Object.defineProperty(module.exports, 'authorize', { value: authorize });

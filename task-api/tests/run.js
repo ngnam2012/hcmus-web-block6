@@ -1,258 +1,336 @@
-/**
- * Automated Tests Suite — Task API (Authorization & Access Control - Block 6)
- *
- * Chạy bằng một lệnh duy nhất:
- *   npm test
- *   (hoặc: node tests/run.js)
- *
- * Bao gồm:
- *  1. Unit Tests: Kiểm tra logic các tầng V0, V1, V2, V3, V4 theo đúng Test Oracle.
- *  2. HTTP Integration Tests: Khởi động Express Server thật, gửi HTTP requests thật
- *     bằng native fetch để xác thực middleware Authentication, mã HTTP 401, 403, 404, 200,
- *     chống giả mạo body/header, và minh chứng quy trình sửa IDOR (đỏ -> xanh).
- */
-
 'use strict';
 
-const http = require('http');
-const { cloneDB, BASE } = require('../src/db');
-const { v0, v1, v2, v3, v4 } = require('../src/taskService');
+const { assert, withApp, expectStatus, snapshot } = require('./helpers');
+const { cloneDB } = require('../src/db');
+const services = require('../src/taskService');
 const { signToken } = require('../src/auth');
-const { app, startServer } = require('../src/server');
+const { ORACLE_TESTS, applyFixture } = require('./oracle');
+const { runEvidence } = require('./idor-regression');
 
-// ── Định dạng màu ANSI ──────────────────────────────────────────────────────
-const G   = s => `\x1b[32m${s}\x1b[0m`;  // Xanh lá
-const R   = s => `\x1b[31m${s}\x1b[0m`;  // Đỏ
-const Y   = s => `\x1b[33m${s}\x1b[0m`;  // Vàng
-const B   = s => `\x1b[34m${s}\x1b[0m`;  // Xanh dương
-const C   = s => `\x1b[36m${s}\x1b[0m`;  // Cyan
-const DIM = s => `\x1b[2m${s}\x1b[0m`;
+const tests = [];
+const test = (name, run) => tests.push({ name, run });
+const permissions = { Viewer: ['read'], Member: ['read', 'edit'], Owner: ['read', 'edit', 'delete', 'members'] };
+const actions = ['read', 'edit', 'delete', 'members'];
 
-let pass = 0, fail = 0;
+function call(version, db, user, action, id, data) {
+  const service = services[version];
+  if (action === 'read') return service.getTask(db, user, id || 'A1');
+  if (action === 'edit') return service.editTask(db, user, id || 'A1', data === undefined ? { title: 'Updated title' } : data);
+  if (action === 'delete') return service.deleteProject(db, user, id || 'alpha');
+  return service.manageMembers(db, user, id || 'alpha', data);
+}
 
-function test(name, result, expect) {
-  const s = result.status;
-  let ok;
-  if (expect === 'ok')       ok = s >= 200 && s < 300;
-  else if (expect === '401') ok = s === 401;
-  else                       ok = s === 403 || s === 404; // 'deny'
-
-  if (ok) {
-    console.log(`  ${G('[ĐẠT]')} ${name} ${DIM(`-> HTTP ${s}`)}`);
-    pass++;
+function checkAction(db, before, action, response, status) {
+  expectStatus(response, status);
+  if (status !== 200) return assert.deepEqual(db, before, 'Denied requests must leave all data unchanged');
+  if (action === 'read') {
+    assert.equal(response.body.id, 'A1');
+    assert.equal(response.body.title, before.tasks.A1.title);
+    assert.deepEqual(db, before);
+  } else if (action === 'edit') {
+    assert.equal(db.tasks.A1.title, 'Updated title');
+    assert.equal(db.tasks.A1.project, before.tasks.A1.project);
+    assert.deepEqual(db.projects, before.projects);
+  } else if (action === 'delete') {
+    assert.equal(db.projects.alpha, undefined);
+    assert.equal(db.tasks.A1, undefined);
+    assert.equal(db.tasks.A2, undefined);
+    assert.deepEqual(db.tasks.B1, before.tasks.B1);
   } else {
-    console.log(`  ${R('[KHÔNG ĐẠT]')} ${name}`);
-    console.log(`    ${R('Kỳ vọng:')} ${expect === 'ok' ? '2xx (cho phép)' : expect}, ${R('Nhận:')} HTTP ${s}`);
-    fail++;
+    assert.equal(response.body.ok, true);
+    assert.deepEqual(db, before, 'An empty membership permission probe must not mutate data');
   }
 }
 
-function section(title) {
-  console.log(`\n${B('==')} ${Y(title)} ${B('==')}`);
+// Each cell has a named test at all three authorization milestones: 36 cells.
+for (const version of ['v2', 'v3', 'v4']) {
+  for (const role of Object.keys(permissions)) {
+    for (const action of actions) test(`${version} matrix ${role}.${action}`, () => {
+      const db = cloneDB();
+      db.projects.alpha.members.bob = role;
+      const before = snapshot(db);
+      checkAction(db, before, action, call(version, db, 'bob', action), permissions[role].includes(action) ? 200 : 403);
+    });
+  }
 }
 
-async function runAllTests() {
-  console.log(`\n${C('========================================================================')}`);
-  console.log(`${C('   TASK MANAGEMENT API — KIỂM THỬ TỰ ĐỘNG AUTHORIZATION (BLOCK 6)')}`);
-  console.log(`${C('========================================================================')}`);
+for (const [user, id, status] of [
+  ['alice', 'A1', 200], ['alice', 'B1', 403], ['charlie', 'B1', 200],
+  ['bob', 'A1', 200], ['bob', 'B1', 403], ['alice', 'missing', 404],
+]) test(`v1 object-level read ${user}/${id} -> ${status}`, () => {
+  const db = cloneDB();
+  const before = snapshot(db);
+  const response = expectStatus(services.v1.getTask(db, user, id), status);
+  if (status === 200) assert.equal(response.body.id, id);
+  else assert.equal(response.body.title, undefined);
+  assert.deepEqual(db, before);
+});
 
-  // =========================================================================
-  // PHẦN 1: UNIT TESTS THEO TỪNG PHIÊN BẢN (PEP & PDP)
-  // =========================================================================
-
-  section('1. V1 — Kiểm tra thành viên project khi đọc (Sửa IDOR/BOLA)');
-  {
-    function callV1Read(userId, taskId) {
-      if (!userId) return { status: 401, body: { error: 'unauthenticated' } };
-      return v1.getTask(cloneDB(), userId, taskId);
-    }
-
-    test('Anonymous đọc task A1 (không có token) -> 401', callV1Read(null, 'A1'), '401');
-    test('Alice đọc task A1 (cùng project Alpha) -> 200', callV1Read('alice', 'A1'), 'ok');
-    test('Alice đọc task B1 (project Beta — Alice không là thành viên) -> 403', callV1Read('alice', 'B1'), 'deny');
-    test('Charlie đọc task B1 (Owner project Beta) -> 200', callV1Read('charlie', 'B1'), 'ok');
-    test('Bob đọc task A1 (Member project Alpha) -> 200', callV1Read('bob', 'A1'), 'ok');
-    test('Bob đọc task B1 (không thuộc project Beta) -> 403', callV1Read('bob', 'B1'), 'deny');
-  }
-
-  section('2. V2 — RBAC theo Project (Role từ bảng thành viên, không tin client)');
-  {
-    function callV2(userId, op, id, dbOverride) {
-      const db = dbOverride || cloneDB();
-      switch (op) {
-        case 'read':    return v2.getTask(db, userId, id);
-        case 'edit':    return v2.editTask(db, userId, id, { title: 'updated' });
-        case 'delete':  return v2.deleteProject(db, userId, id);
-        case 'members': return v2.manageMembers(db, userId, id);
-      }
-    }
-
-    function dbWithViewer() {
-      const db = cloneDB();
-      db.projects.alpha.members.bob = 'Viewer';
-      return db;
-    }
-
-    test('Viewer sửa task A1 -> 403', callV2('bob', 'edit', 'A1', dbWithViewer()), 'deny');
-    test('Member (Bob) xóa project Alpha -> 403', callV2('bob', 'delete', 'alpha'), 'deny');
-    test('Member (Bob) quản lý thành viên project Alpha -> 403', callV2('bob', 'members', 'alpha'), 'deny');
-    test('Owner (Alice) xóa project Alpha -> 200', callV2('alice', 'delete', 'alpha'), 'ok');
-    test('Owner (Alice) quản lý thành viên project Alpha -> 200', callV2('alice', 'members', 'alpha'), 'ok');
-    test('Bob tự khai admin nhưng service không tin client -> 403', callV2('bob', 'delete', 'alpha'), 'deny');
-    test('Admin Dana xóa project Alpha (V2: global admin chưa có tenant check) -> 200', callV2('dana', 'delete', 'alpha'), 'ok');
-  }
-
-  section('3. V3 — ReBAC + ABAC (Member chỉ sửa task được giao và còn mở)');
-  {
-    function callV3(userId, op, id, dbOverride) {
-      const db = dbOverride || cloneDB();
-      switch (op) {
-        case 'read':   return v3.getTask(db, userId, id);
-        case 'edit':   return v3.editTask(db, userId, id, { title: 'updated' });
-        case 'delete': return v3.deleteProject(db, userId, id);
-      }
-    }
-
-    test('Member Bob sửa task A1 (được giao cho Bob, còn mở) -> 200', callV3('bob', 'edit', 'A1'), 'ok');
-    test('Member Bob sửa task A2 (chưa được giao cho Bob) -> 403', callV3('bob', 'edit', 'A2'), 'deny');
-    test('Member Bob sửa task A1 đã đóng (Closed) -> 403', (() => {
-      const db = cloneDB();
-      db.tasks.A1.status = 'Closed';
-      return v3.editTask(db, 'bob', 'A1', {});
-    })(), 'deny');
-    test('Member Bob sửa task B1 (thuộc project Beta khác) -> 403', callV3('bob', 'edit', 'B1'), 'deny');
-    test('Owner Alice sửa task A1 -> 200', callV3('alice', 'edit', 'A1'), 'ok');
-    test('Owner Alice sửa task A2 (chưa phân công) -> 200', callV3('alice', 'edit', 'A2'), 'ok');
-  }
-
-  section('4. V4 — Ranh giới Tenant (Cô lập dữ liệu giữa các tổ chức)');
-  {
-    function callV4(userId, op, id, dbOverride) {
-      const db = dbOverride || cloneDB();
-      switch (op) {
-        case 'read':   return v4.getTask(db, userId, id);
-        case 'edit':   return v4.editTask(db, userId, id, { title: 'updated' });
-        case 'delete': return v4.deleteProject(db, userId, id);
-      }
-    }
-
-    test('Admin Dana (tenant alpha) đọc task A1 (cùng tenant) -> 200', callV4('dana', 'read', 'A1'), 'ok');
-    test('Admin Dana đọc task B1 (tenant beta khác) -> 403', callV4('dana', 'read', 'B1'), 'deny');
-    test('Admin Dana cố đọc task B1 dù tự khai tenantId=beta -> 403', callV4('dana', 'read', 'B1'), 'deny');
-    test('Alice (Alpha) đọc task A1 -> 200', callV4('alice', 'read', 'A1'), 'ok');
-    test('Alice đọc task B1 (Tenant Beta) -> 403', callV4('alice', 'read', 'B1'), 'deny');
-    test('Charlie (tenant beta, Owner) đọc task B1 -> 200', callV4('charlie', 'read', 'B1'), 'ok');
-  }
-
-  section('5. Minh chứng IDOR: V0 (Lộ dữ liệu) vs V1 (Đã khắc phục)');
-  {
-    test('V0: Alice đọc task B1 -> 200 (LỖI IDOR: Dữ liệu B1 của Beta bị lộ)', v0.getTask(cloneDB(), 'alice', 'B1'), 'ok');
-    test('V1: Alice đọc task B1 -> 403 (Đã vá lỗ hổng IDOR)', v1.getTask(cloneDB(), 'alice', 'B1'), 'deny');
-    test('V1: Alice đọc task A1 (Test cho phép vẫn thành công) -> 200', v1.getTask(cloneDB(), 'alice', 'A1'), 'ok');
-  }
-
-  section('6. Ngữ nghĩa mã HTTP (401, 403, 404)');
-  {
-    test('GET /tasks/Z99 (Resource không tồn tại) -> 404', v4.getTask(cloneDB(), 'alice', 'Z99'), 'deny');
-    test('Bob (Member) xóa Project Alpha -> 403', v4.deleteProject(cloneDB(), 'bob', 'alpha'), 'deny');
-    test('Bob sửa task A1 khi đã đóng (Closed) -> 403', (() => {
-      const db = cloneDB();
-      db.tasks.A1.status = 'Closed';
-      return v4.editTask(db, 'bob', 'A1', {});
-    })(), 'deny');
-  }
-
-  // =========================================================================
-  // PHẦN 2: HTTP INTEGRATION TESTS TRỰC TIẾP QUA EXPRESS SERVER THẬT
-  // =========================================================================
-
-  section('7. Kiểm thử tích hợp HTTP thực tế qua Express Server');
-
-  const TEST_PORT = 3998;
-  const server = await new Promise(resolve => {
-    const s = app.listen(TEST_PORT, () => resolve(s));
+for (const version of ['v3', 'v4']) {
+  for (const scenario of ['unassigned', 'assigned_to_other', 'closed', 'other_project']) test(`${version} Member edit denied: ${scenario}; no mutation`, () => {
+    const db = cloneDB();
+    if (scenario === 'unassigned') db.tasks.A1.assignee = null;
+    if (scenario === 'assigned_to_other') db.tasks.A1.assignee = 'alice';
+    if (scenario === 'closed') db.tasks.A1.status = 'Closed';
+    const before = snapshot(db);
+    expectStatus(services[version].editTask(db, 'bob', scenario === 'other_project' ? 'B1' : 'A1', { title: 'Unauthorized', assignee: 'bob', status: 'Open' }), 403);
+    assert.deepEqual(db, before);
   });
-
-  const baseUrl = `http://localhost:${TEST_PORT}`;
-  const tokens = {
-    alice: signToken('alice'),
-    bob: signToken('bob'),
-    charlie: signToken('charlie'),
-    dana: signToken('dana')
-  };
-
-  try {
-    // 7.1. Test Authentication Middleware
-    const noAuthRes = await fetch(`${baseUrl}/tasks/A1`);
-    test('HTTP: Request không có header Authorization -> 401', { status: noAuthRes.status }, '401');
-
-    const badAuthRes = await fetch(`${baseUrl}/tasks/A1`, {
-      headers: { 'Authorization': 'Bearer token-sai-dinh-dang' }
-    });
-    test('HTTP: Request với token không hợp lệ -> 401', { status: badAuthRes.status }, '401');
-
-    // 7.2. Test IDOR thực tế qua HTTP
-    const v0Res = await fetch(`${baseUrl}/tasks/B1`, {
-      headers: { 'Authorization': `Bearer ${tokens.alice}`, 'x-version': 'v0' }
-    });
-    test('HTTP [V0]: Alice đọc task B1 (Bị lộ dữ liệu IDOR) -> 200', { status: v0Res.status }, 'ok');
-
-    const v1Res = await fetch(`${baseUrl}/tasks/B1`, {
-      headers: { 'Authorization': `Bearer ${tokens.alice}`, 'x-version': 'v1' }
-    });
-    test('HTTP [V1]: Alice đọc task B1 (Đã chặn IDOR) -> 403', { status: v1Res.status }, 'deny');
-
-    const v1AllowedRes = await fetch(`${baseUrl}/tasks/A1`, {
-      headers: { 'Authorization': `Bearer ${tokens.alice}`, 'x-version': 'v1' }
-    });
-    test('HTTP [V1]: Alice đọc task A1 (Hợp lệ) -> 200', { status: v1AllowedRes.status }, 'ok');
-
-    // 7.3. Test Client Forgery qua HTTP Body & Header
-    const forgeRoleRes = await fetch(`${baseUrl}/projects/alpha`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${tokens.bob}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ role: 'Admin' })
-    });
-    test('HTTP: Bob gửi body {role: "Admin"} để xóa project -> 403', { status: forgeRoleRes.status }, 'deny');
-
-    const forgeTenantRes = await fetch(`${baseUrl}/tasks/B1`, {
-      headers: {
-        'Authorization': `Bearer ${tokens.dana}`,
-        'X-Tenant-Id': 'beta'
-      }
-    });
-    test('HTTP: Dana gửi header X-Tenant-Id: beta để đọc task B1 -> 403', { status: forgeTenantRes.status }, 'deny');
-
-    const notFoundRes = await fetch(`${baseUrl}/tasks/Z99`, {
-      headers: { 'Authorization': `Bearer ${tokens.alice}` }
-    });
-    test('HTTP: Đọc task không tồn tại Z99 -> 404', { status: notFoundRes.status }, 'deny');
-
-  } finally {
-    await new Promise(resolve => server.close(resolve));
-  }
-
-  // =========================================================================
-  // TỔNG KẾT
-  // =========================================================================
-  const total = pass + fail;
-  console.log(`\n${'─'.repeat(60)}`);
-  if (fail === 0) {
-    console.log(G(`TỔNG KẾT: TẤT CẢ ${total} KIỂM THỬ ĐỀU VƯỢT QUA (100% ĐẠT)!`));
-    console.log(DIM(`   Bao gồm 31 unit tests logic + 8 integration tests HTTP thực tế.`));
-  } else {
-    console.log(R(`[CHƯA ĐẠT] Có ${fail}/${total} kiểm thử bị thất bại!`));
-    console.log(G(`[ĐẠT] ${pass}/${total} kiểm thử đã vượt qua.`));
-  }
-  console.log(`${'─'.repeat(60)}\n`);
-
-  process.exit(fail > 0 ? 1 : 0);
+  test(`${version} Owner can edit an unassigned Closed task`, () => {
+    const db = cloneDB();
+    db.tasks.A2.status = 'Closed';
+    expectStatus(services[version].editTask(db, 'alice', 'A2', { title: 'Owner update' }), 200);
+    assert.equal(db.tasks.A2.title, 'Owner update');
+  });
 }
 
-runAllTests().catch(err => {
-  console.error('Lỗi khi chạy kiểm thử:', err);
-  process.exit(1);
+for (const action of actions) {
+  test(`v4 Admin own tenant ${action} allowed`, () => {
+    const db = cloneDB();
+    checkAction(db, snapshot(db), action, call('v4', db, 'dana', action), 200);
+  });
+  for (const user of ['dana', 'alice', 'charlie', 'nonmember']) test(`v4 ${user} forbidden scope ${action}; no mutation`, () => {
+    const db = cloneDB();
+    db.users.nonmember = { name: 'No membership', tenant: 'alpha' };
+    const before = snapshot(db);
+    const sameTenantTarget = user === 'charlie' || user === 'nonmember';
+    const id = action === 'read' || action === 'edit' ? (sameTenantTarget ? 'A1' : 'B1') : (sameTenantTarget ? 'alpha' : 'beta');
+    expectStatus(call('v4', db, user, action, id), 403);
+    assert.deepEqual(db, before);
+  });
+  test(`Business entry point rejects missing/unknown principal for ${action}`, () => {
+    for (const user of [null, '', 'missing', 'constructor', '__proto__']) {
+      const db = cloneDB();
+      const before = snapshot(db);
+      expectStatus(call('v4', db, user, action), 401);
+      assert.deepEqual(db, before);
+    }
+  });
+}
+
+for (const role of ['Admin', 'constructor', '__proto__', 'toString', 'Unknown']) test(`Unrecognized project role ${role} grants no access`, () => {
+  const db = cloneDB();
+  db.projects.alpha.members.bob = role;
+  const before = snapshot(db);
+  expectStatus(services.v4.getTask(db, 'bob', 'A1'), 403);
+  expectStatus(services.v4.editTask(db, 'bob', 'A1', { title: 'Unexpected' }), 403);
+  assert.deepEqual(db, before);
+});
+
+for (const entry of ORACLE_TESTS) test(`HTTP oracle V${entry.v}: ${entry.name}`, async () => {
+  const db = applyFixture(cloneDB(), entry.fixture);
+  const before = snapshot(db);
+  await withApp({ version: 'v4', db }, async api => {
+    const response = expectStatus(await api(entry.method, entry.path, entry), entry.status);
+    if (entry.status >= 400) {
+      assert.equal(response.body.title, undefined);
+      assert.deepEqual(db, before);
+    } else if (entry.method === 'GET') assert.equal(response.body.id, entry.path.split('/').pop());
+    else if (entry.method === 'PATCH') assert.equal(db.tasks.A1.title, entry.body.title);
+    else if (entry.method === 'DELETE') {
+      assert.equal(db.projects.alpha, undefined);
+      assert.equal(db.tasks.A1, undefined);
+    } else assert.equal(response.body.ok, true);
+  });
+});
+
+const endpoints = [['GET', '/tasks/A1'], ['PATCH', '/tasks/A1'], ['DELETE', '/projects/alpha'], ['POST', '/projects/alpha/members']];
+for (const [method, path] of endpoints) test(`HTTP Anonymous ${method} ${path} -> 401`, async () => {
+  const db = cloneDB();
+  const before = snapshot(db);
+  await withApp({ db }, async api => expectStatus(await api(method, path), 401));
+  assert.deepEqual(db, before);
+});
+
+for (const [name, token] of [
+  ['invalid signature', 'invalid.jwt.token'], ['expired token', signToken('alice', { iat: 1 })],
+  ['unknown subject', signToken('unknown')], ['prototype subject', signToken('constructor')],
+]) test(`HTTP authentication rejects ${name}`, async () => {
+  await withApp({}, async api => expectStatus(await api('GET', '/tasks/A1', { token }), 401));
+});
+
+test('HTTP signed id/role/tenant claims cannot override verified sub', async () => {
+  const db = cloneDB();
+  const before = snapshot(db);
+  await withApp({ db }, async api => {
+    const token = signToken('bob', { id: 'alice', role: 'Admin', tenant: 'beta', tenantId: 'beta' });
+    expectStatus(await api('DELETE', '/projects/alpha', { token }), 403);
+    expectStatus(await api('GET', '/tasks/B1', { token }), 403);
+    expectStatus(await api('PATCH', '/tasks/A2', { token, body: { title: 'Forged identity' } }), 403);
+  });
+  assert.deepEqual(db, before);
+});
+
+test('HTTP body userId and role cannot impersonate Owner', async () => {
+  const db = cloneDB();
+  const before = snapshot(db);
+  await withApp({ db }, async api => {
+    expectStatus(await api('DELETE', '/projects/alpha', { user: 'bob', body: { userId: 'alice', role: 'Admin' } }), 403);
+    expectStatus(await api('POST', '/projects/alpha/members', { user: 'bob', body: { userId: 'bob', role: 'Owner' } }), 403);
+  });
+  assert.deepEqual(db, before);
+});
+
+for (const attempt of [
+  { name: 'query', path: '/tasks/B1?version=v0' },
+  { name: 'header', path: '/tasks/B1', headers: { 'x-version': 'v0' } },
+]) test(`HTTP client ${attempt.name} cannot downgrade V4`, async () => {
+  await withApp({}, async api => {
+    expectStatus(await api('GET', attempt.path, { user: 'alice', headers: attempt.headers }), 403);
+    assert.equal(expectStatus(await api('GET', '/api/version'), 200).body.version, 'v4');
+  });
+});
+
+for (const [method, path, body] of [
+  ['POST', '/api/version', { version: 'v0' }], ['GET', '/api/tokens'], ['GET', '/api/db'],
+  ['POST', '/test/reset', { fixture: 'viewer' }], ['POST', '/api/test/reset', { fixture: 'closed' }],
+]) test(`HTTP normal API has no demo helper ${method} ${path}`, async () => {
+  const db = cloneDB();
+  const before = snapshot(db);
+  await withApp({ db }, async api => {
+    expectStatus(await api(method, path, { body }), 404);
+    expectStatus(await api(method, path, { user: 'dana', body }), 404);
+    assert.equal((await api('GET', '/api/version')).body.version, 'v4');
+  });
+  assert.deepEqual(db, before);
+});
+
+test('HTTP demo switching is explicit and isolated from the normal API', async () => {
+  await withApp({ demo: true }, async demo => withApp({}, async normal => {
+    expectStatus(await demo('GET', '/api/tokens'), 200);
+    expectStatus(await demo('GET', '/api/db'), 404);
+    expectStatus(await demo('GET', '/tasks/B1?version=v0', { user: 'alice' }), 403);
+    expectStatus(await demo('POST', '/api/version', { body: { version: 'v0' } }), 200);
+    assert.equal(expectStatus(await demo('GET', '/tasks/B1', { user: 'alice' }), 200).body.id, 'B1');
+    expectStatus(await normal('GET', '/tasks/B1', { user: 'alice' }), 403);
+    assert.equal((await normal('GET', '/api/version')).body.version, 'v4');
+    expectStatus(await demo('POST', '/api/version', { body: { version: 'constructor' } }), 400);
+  }));
+});
+
+for (const [name, body] of [
+  ['cross-tenant project transfer', { project: 'beta', assignee: 'charlie' }], ['same-tenant project reassignment', { project: 'alpha' }],
+  ['task id', { id: 'B1' }], ['tenant', { tenant: 'beta' }], ['tenantId', { tenantId: 'beta' }], ['role', { role: 'Owner' }],
+  ['unknown field', { arbitrary: true }], ['invalid status', { status: 'Deleted' }], ['invalid title', { title: 123 }], ['empty title', { title: '' }],
+  ['foreign assignee', { assignee: 'charlie' }], ['unknown assignee', { assignee: 'missing' }], ['array', []], ['null', null],
+  ['prototype mutation', JSON.parse('{"__proto__":{"project":"beta"}}')],
+]) test(`HTTP PATCH rejects ${name} and preserves data`, async () => {
+  const db = cloneDB();
+  const before = snapshot(db);
+  await withApp({ db }, async api => {
+    expectStatus(await api('PATCH', '/tasks/A1', { user: 'bob', body }), 400);
+    expectStatus(await api('GET', '/tasks/A1', { user: 'charlie' }), 403);
+    const response = expectStatus(await api('GET', '/tasks/A1', { user: 'alice' }), 200);
+    assert.equal(response.body.project, 'alpha');
+    assert.equal(response.body.title, before.tasks.A1.title);
+  });
+  assert.deepEqual(db, before);
+  assert.equal(Object.prototype.project, undefined);
+});
+
+test('HTTP authorized PATCH persists allowed fields; closed task cannot be reopened by Member', async () => {
+  const db = cloneDB();
+  await withApp({ db }, async api => {
+    expectStatus(await api('PATCH', '/tasks/A1', { user: 'bob', body: { title: 'Finished', status: 'Closed', assignee: 'alice' } }), 200);
+    const task = expectStatus(await api('GET', '/tasks/A1', { user: 'alice' }), 200).body;
+    assert.equal(task.title, 'Finished');
+    assert.equal(task.status, 'Closed');
+    assert.equal(task.assignee, 'alice');
+    assert.equal(task.project, 'alpha');
+    const before = snapshot(db);
+    expectStatus(await api('PATCH', '/tasks/A1', { user: 'bob', body: { status: 'Open', assignee: 'bob' } }), 403);
+    assert.deepEqual(db, before);
+  });
+});
+
+for (const [method, path] of [
+  ['GET', '/tasks/missing'], ['PATCH', '/tasks/missing'], ['DELETE', '/projects/missing'], ['POST', '/projects/missing/members'],
+  ['GET', '/tasks/constructor'], ['GET', '/tasks/__proto__'], ['DELETE', '/projects/constructor'], ['POST', '/projects/__proto__/members'],
+]) test(`HTTP missing/prototype resource ${method} ${path} -> exactly 404`, async () => {
+  const db = cloneDB();
+  const before = snapshot(db);
+  await withApp({ db }, async api => expectStatus(await api(method, path, { user: 'alice', body: method === 'PATCH' ? {} : undefined }), 404));
+  assert.deepEqual(db, before);
+});
+
+test('HTTP Owner changes membership; same JWT loses permissions immediately', async () => {
+  const db = cloneDB();
+  const bobToken = signToken('bob');
+  await withApp({ db }, async api => {
+    expectStatus(await api('PATCH', '/tasks/A1', { token: bobToken, body: { title: 'Before demotion' } }), 200);
+    expectStatus(await api('POST', '/projects/alpha/members', { user: 'alice', body: { userId: 'bob', role: 'Viewer' } }), 200);
+    assert.equal(db.projects.alpha.members.bob, 'Viewer');
+    expectStatus(await api('GET', '/tasks/A1', { token: bobToken }), 200);
+    const before = snapshot(db);
+    expectStatus(await api('PATCH', '/tasks/A1', { token: bobToken, body: { title: 'After demotion' } }), 403);
+    assert.deepEqual(db, before);
+    expectStatus(await api('POST', '/projects/alpha/members', { user: 'alice', body: { userId: 'bob', remove: true } }), 200);
+    assert.equal(db.projects.alpha.members.bob, undefined);
+    assert.equal(db.tasks.A1.assignee, null);
+    expectStatus(await api('GET', '/tasks/A1', { token: bobToken }), 403);
+  });
+});
+
+test('HTTP Owner adds same-tenant user and grants actual read access', async () => {
+  const db = cloneDB();
+  db.users.eve = { name: 'Eve', tenant: 'alpha' };
+  await withApp({ db }, async api => {
+    expectStatus(await api('GET', '/tasks/A1', { user: 'eve' }), 403);
+    expectStatus(await api('POST', '/projects/alpha/members', { user: 'alice', body: { userId: 'eve', role: 'Viewer' } }), 200);
+    assert.equal(db.projects.alpha.members.eve, 'Viewer');
+    expectStatus(await api('GET', '/tasks/A1', { user: 'eve' }), 200);
+    expectStatus(await api('PATCH', '/tasks/A1', { user: 'eve', body: { title: 'Viewer edit' } }), 403);
+  });
+});
+
+for (const [name, body, status] of [
+  ['cross-tenant user', { userId: 'charlie', role: 'Viewer' }, 400], ['unknown user', { userId: 'missing', role: 'Viewer' }, 400],
+  ['invented Admin role', { userId: 'bob', role: 'Admin' }, 400], ['prototype role', { userId: 'bob', role: 'constructor' }, 400],
+  ['remove final Owner', { userId: 'alice', remove: true }, 409], ['demote final Owner', { userId: 'alice', role: 'Viewer' }, 409],
+]) test(`HTTP membership rejects ${name}`, async () => {
+  const db = cloneDB();
+  const before = snapshot(db);
+  await withApp({ db }, async api => expectStatus(await api('POST', '/projects/alpha/members', { user: 'alice', body }), status));
+  assert.deepEqual(db, before);
+});
+
+test('HTTP current server tenant/admin state overrides stale token claims', async () => {
+  const db = cloneDB();
+  const token = signToken('dana', { admin: true, tenant: 'alpha' });
+  await withApp({ db }, async api => {
+    expectStatus(await api('GET', '/tasks/A1', { token }), 200);
+    db.users.dana.admin = false;
+    expectStatus(await api('GET', '/tasks/A1', { token }), 403);
+    db.users.dana.admin = true;
+    db.users.dana.tenant = 'beta';
+    expectStatus(await api('GET', '/tasks/A1', { token }), 403);
+    expectStatus(await api('GET', '/tasks/B1', { token }), 200);
+    delete db.users.dana;
+    expectStatus(await api('GET', '/tasks/B1', { token }), 401);
+  });
+});
+
+test('IDOR RED -> GREEN uses the unchanged deny assertion, with positive controls', async () => runEvidence());
+
+async function main() {
+  console.log('Task API — authorization regression suite (exact status + data invariants)');
+  let passed = 0;
+  let failed = 0;
+  for (const { name, run } of tests) {
+    try {
+      await run();
+      passed++;
+      console.log(`[PASS] ${name}`);
+    } catch (error) {
+      failed++;
+      console.error(`[FAIL] ${name}\n${error.stack}`);
+    }
+  }
+  console.log(`\nRESULT: ${passed}/${tests.length} passed; ${failed} failed`);
+  process.exitCode = failed ? 1 : 0;
+}
+
+main().catch(error => {
+  console.error(error.stack);
+  process.exitCode = 1;
 });

@@ -1,0 +1,22 @@
+Command: node tests/browser-e2e.js
+Execution: approved outside the Windows sandbox after the sandbox browser-launch timeout.
+
+[E2E] Starting headless browser...
+[E2E] Browser launched.
+[E2E] Demo page navigated.
+[E2E] Demo UI ready.
+[PASS] Demo initializes from server metadata
+[PASS] Alice reads A1: status 200 and correct resource
+[PASS] Alice cannot read B1 in V4
+[PASS] Assigned Open task allowed; unassigned task denied
+[PASS] Client role/tenant claims cannot grant permission
+[PASS] Browser oracle asserts 17 actual successful results and zero failures
+[PASS] Same IDOR expectation is red on V0 and green on V1; valid reads still pass
+[PASS] Permission matrix is available
+[PASS] Fixed API UI disables demo controls and does not request demo tokens
+[PASS] Fixed API accepts manually supplied token and rejects version downgrade header
+[PASS] No JavaScript errors on demo or fixed UI
+
+Browser E2E: 11/11 checks passed; oracle 17/17. Evidence: public/screenshots/.
+
+Exit code: 0

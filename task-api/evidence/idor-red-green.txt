@@ -1,0 +1,8 @@
+Command: node tests/idor-regression.js
+[RED — expected regression failure] V0: expected 403, received 200
+{"status":200,"body":{"id":"B1","project":"beta","title":"Ngân sách dự án Beta","assignee":"charlie","status":"Open"}}
+[GREEN] V1: the SAME assertion expected 403, received 403
+{"status":403,"body":{"error":"forbidden"}}
+[GREEN] Positive controls: Alice reads A1; Charlie reads B1
+
+Exit code: 0

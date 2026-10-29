@@ -1,311 +1,150 @@
-/**
- * TaskService — Business layer chứa toàn bộ logic kiểm quyền (PEP & PDP).
- *
- * Theo nguyên tắc từ slide:
- *  - Đặt kiểm quyền ở business layer (không ở controller) để mọi
- *    entry point đều đi qua cùng một điểm kiểm.
- *  - Không tin userId, role, tenantId do client tự khai.
- *  - Deny by default: nếu không có rule nào cấp quyền thì từ chối.
- *
- * ─────────────────────────────────────────────────────────────
- * Các phiên bản (version) được export ra:
- *  v0  – Starter: chỉ kiểm token, không kiểm quyền object (Lỗ hổng IDOR/BOLA).
- *  v1  – Kiểm thành viên project khi đọc task (Sửa IDOR).
- *  v2  – RBAC: role lấy từ bảng thành viên; Admin toàn cục là Owner mọi project.
- *  v3  – RBAC + ABAC + ReBAC: Member chỉ sửa task giao cho mình và còn Open.
- *  v4  – V3 + Tenant boundary: Admin và User bị giới hạn trong tenant của mình.
- * ─────────────────────────────────────────────────────────────
+﻿/**
+ * TaskService: mọi business entry point dùng chung authorize (PEP/PDP).
+ * V0/V1 giữ các thiếu sót phân quyền có chủ đích để so sánh trong demo.
+ * V2: RBAC project; V3: thêm assignee + Open; V4: thêm tenant boundary.
  */
-
 'use strict';
 
-const { BASE }     = require('./db');
-const { canByRole } = require('./rbac');
+const { MATRIX, canByRole } = require('./rbac');
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+const own = (object, key) => typeof key === 'string' &&
+  object != null && Object.prototype.hasOwnProperty.call(object, key);
+const get = (object, key) => own(object, key) ? object[key] : null;
+const deny = (reason) => ({ status: 403, body: { error: 'forbidden', ...(reason && { reason }) } });
+const invalid = (reason) => ({ status: 400, body: { error: 'invalid_input', reason } });
+const success = () => ({ status: 200, body: { ok: true } });
+const plainObject = value => value != null && typeof value === 'object' &&
+  !Array.isArray(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
 
 /**
- * Lấy project theo projectId (hoặc null).
+ * Policy Decision Point. Identity, membership, role và tenant chỉ lấy từ DB.
+ * Không dùng role/tenant/userId trong payload để xác định người đang gọi.
+ * Rule không tồn tại hoặc role không hợp lệ luôn bị từ chối.
  */
-function getProject(db, projectId) {
-  return db.projects[projectId] || null;
+function authorize(version, db, userId, action, resourceId) {
+  const user = get(db.users, userId);
+  if (!user) return { status: 401, body: { error: 'unauthenticated' } };
+  if (!['v0', 'v1', 'v2', 'v3', 'v4'].includes(version)) return deny('invalid_policy');
+  if (!['read', 'edit', 'delete', 'members'].includes(action)) return deny('unknown_action');
+
+  const projectAction = action === 'delete' || action === 'members';
+  const resource = get(projectAction ? db.projects : db.tasks, resourceId);
+  const project = projectAction ? resource : resource && get(db.projects, resource.project);
+  if (!resource || !project) return { status: 404, body: { error: 'not_found' } };
+
+  const memberRole = get(project.members, userId);
+  let role = memberRole;
+  // Historical demo: V0 lacks object authorization; V1 fixes only reading.
+  if (version === 'v0' || (version === 'v1' && action !== 'read')) {
+    return { status: 200, resource, project, user, role };
+  }
+  if (version === 'v1') {
+    if (!own(MATRIX, memberRole)) return deny();
+    return { status: 200, resource, project, user, role };
+  }
+
+  // Tenant boundary must run before the Admin shortcut.
+  if (version === 'v4' && user.tenant !== project.tenant) return deny('tenant_mismatch');
+  if (user.admin === true) role = 'Owner';
+  if (!canByRole(role, action)) return deny();
+
+  if ((version === 'v3' || version === 'v4') && action === 'edit' && role === 'Member') {
+    if (resource.assignee !== userId) return deny('not_assignee');
+    if (resource.status !== 'Open') return deny('task_closed');
+  }
+  return { status: 200, resource, project, user, role };
 }
 
-// ── V0: Starter ──────────────────────────────────────────────────────────────
-// Lỗi IDOR: chỉ kiểm token, không kiểm quyền trên object.
-
-const v0 = {
-  getTask(db, userId, taskId) {
-    const task = db.tasks[taskId];
-    if (!task) return { status: 404, body: { error: 'not_found' } };
-    // ❌ LỖI IDOR: Không kiểm tra người gọi có thuộc project chứa task không!
-    return { status: 200, body: { id: taskId, ...task } };
-  },
-
-  editTask(db, userId, taskId, data) {
-    const task = db.tasks[taskId];
-    if (!task) return { status: 404, body: { error: 'not_found' } };
-    Object.assign(task, data);
-    return { status: 200, body: { ok: true } };
-  },
-
-  deleteProject(db, userId, projectId) {
-    const project = getProject(db, projectId);
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-    delete db.projects[projectId];
-    return { status: 200, body: { ok: true } };
-  },
-
-  manageMembers(db, userId, projectId) {
-    const project = getProject(db, projectId);
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-    return { status: 200, body: { ok: true } };
-  },
-};
-
-// ── V1: Kiểm thành viên project khi đọc ─────────────────────────────────────
-
-const v1 = {
-  getTask(db, userId, taskId) {
-    const task    = db.tasks[taskId];
-    if (!task) return { status: 404, body: { error: 'not_found' } };
-
-    const project = db.projects[task.project];
-    const member  = project && project.members[userId];
-
-    // ✅ Kiểm thành viên (sửa IDOR đọc)
-    if (!member) return { status: 403, body: { error: 'forbidden' } };
-
-    return { status: 200, body: { id: taskId, ...task } };
-  },
-
-  editTask(db, userId, taskId, data) {
-    const task = db.tasks[taskId];
-    if (!task) return { status: 404, body: { error: 'not_found' } };
-
-    // ⚠️ Thao tác ghi chưa được bảo vệ theo role (V1 chỉ fix READ)
-    Object.assign(task, data);
-    return { status: 200, body: { ok: true } };
-  },
-
-  deleteProject(db, userId, projectId) {
-    const project = getProject(db, projectId);
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-
-    // ⚠️ Chưa kiểm quyền xóa project
-    delete db.projects[projectId];
-    return { status: 200, body: { ok: true } };
-  },
-
-  manageMembers(db, userId, projectId) {
-    const project = getProject(db, projectId);
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-
-    return { status: 200, body: { ok: true } };
-  },
-};
-
-// ── V2: RBAC ─────────────────────────────────────────────────────────────────
-// Role lấy từ bảng thành viên, không tin role do client tự khai.
-// Admin (global) coi như Owner ở mọi project — nhưng chưa có tenant boundary.
-
-const v2 = {
-  _resolveRole(db, userId, project) {
-    const user = BASE.users[userId];
-    if (!user) return null;
-
-    // Admin toàn cục → Owner (V2 chưa có tenant boundary)
-    if (user.admin) return 'Owner';
-
-    return project.members[userId] || null;
-  },
-
-  getTask(db, userId, taskId) {
-    const task    = db.tasks[taskId];
-    if (!task) return { status: 404, body: { error: 'not_found' } };
-
-    const project = db.projects[task.project];
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-
-    const role = this._resolveRole(db, userId, project);
-    if (!canByRole(role, 'read'))
-      return { status: 403, body: { error: 'forbidden' } };
-
-    return { status: 200, body: { id: taskId, ...task } };
-  },
-
-  editTask(db, userId, taskId, data) {
-    const task    = db.tasks[taskId];
-    if (!task) return { status: 404, body: { error: 'not_found' } };
-
-    const project = db.projects[task.project];
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-
-    const role = this._resolveRole(db, userId, project);
-    if (!canByRole(role, 'edit'))
-      return { status: 403, body: { error: 'forbidden' } };
-
-    Object.assign(task, data);
-    return { status: 200, body: { ok: true } };
-  },
-
-  deleteProject(db, userId, projectId) {
-    const project = getProject(db, projectId);
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-
-    const role = this._resolveRole(db, userId, project);
-    if (!canByRole(role, 'delete'))
-      return { status: 403, body: { error: 'forbidden' } };
-
-    delete db.projects[projectId];
-    return { status: 200, body: { ok: true } };
-  },
-
-  manageMembers(db, userId, projectId) {
-    const project = getProject(db, projectId);
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-
-    const role = this._resolveRole(db, userId, project);
-    if (!canByRole(role, 'members'))
-      return { status: 403, body: { error: 'forbidden' } };
-
-    return { status: 200, body: { ok: true } };
-  },
-};
-
-// ── V3: RBAC + ABAC + ReBAC ──────────────────────────────────────────────────
-// Mở rộng V2: Member chỉ sửa task được giao cho mình (ReBAC) VÀ task còn Open (ABAC).
-
-const v3 = {
-  ...v2,
-
-  editTask(db, userId, taskId, data) {
-    const task    = db.tasks[taskId];
-    if (!task) return { status: 404, body: { error: 'not_found' } };
-
-    const project = db.projects[task.project];
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-
-    const role = v2._resolveRole(db, userId, project);
-    if (!canByRole(role, 'edit'))
-      return { status: 403, body: { error: 'forbidden' } };
-
-    // ✅ ReBAC + ABAC: Member chỉ sửa task của chính mình khi còn Open
-    if (role === 'Member') {
-      if (task.assignee !== userId)
-        return { status: 403, body: { error: 'forbidden', reason: 'not_assignee' } };
-      if (task.status !== 'Open')
-        return { status: 403, body: { error: 'forbidden', reason: 'task_closed' } };
+/** Validate before mutation: task.project is immutable, so PATCH cannot move data. */
+function validateTaskPatch(db, project, data) {
+  if (!plainObject(data)) return invalid('expected_object');
+  const allowedFields = ['title', 'status', 'assignee'];
+  if (Object.keys(data).some(key => !allowedFields.includes(key))) return invalid('unsupported_field');
+  if (own(data, 'title') && (typeof data.title !== 'string' ||
+      !data.title.trim() || data.title.length > 500)) return invalid('invalid_title');
+  if (own(data, 'status') && !['Open', 'Closed'].includes(data.status)) return invalid('invalid_status');
+  if (own(data, 'assignee') && data.assignee !== null) {
+    const assignee = get(db.users, data.assignee);
+    const role = get(project.members, data.assignee);
+    if (!assignee || assignee.tenant !== project.tenant || !own(MATRIX, role)) {
+      return invalid('invalid_assignee');
     }
+  }
+  return null;
+}
 
-    Object.assign(task, data);
-    return { status: 200, body: { ok: true } };
-  },
-};
+function validateMemberChange(db, project, data) {
+  if (!plainObject(data)) return invalid('expected_object');
+  if (Object.keys(data).length === 0) return null; // Oracle permission probe.
+  if (Object.keys(data).some(key => !['userId', 'role', 'remove'].includes(key))) {
+    return invalid('unsupported_field');
+  }
+  const target = get(db.users, data.userId);
+  if (!target || target.tenant !== project.tenant) return invalid('invalid_member');
+  if (data.remove === true) {
+    if (own(data, 'role')) return invalid('ambiguous_member_change');
+  } else if (own(data, 'remove') || !own(MATRIX, data.role)) {
+    return invalid('invalid_role');
+  }
+  // Keep at least one project Owner. Admin remains a tenant-level privilege,
+  // and can never be assigned as a project role by the request body.
+  const existingRole = get(project.members, data.userId);
+  if (existingRole === 'Owner' && (data.remove === true || data.role !== 'Owner')) {
+    const owners = Object.values(project.members).filter(role => role === 'Owner').length;
+    if (owners <= 1) return { status: 409, body: { error: 'last_owner' } };
+  }
+  return null;
+}
 
-// ── V4: V3 + Tenant Boundary ─────────────────────────────────────────────────
-// Ranh giới Tenant cách ly hoàn toàn dữ liệu giữa các tổ chức.
-// Admin chỉ có quyền Owner trong tenant của chính họ.
-// tenantId PHẢI lấy từ DB (không tin header/body client tự khai).
+function createService(version) {
+  return Object.freeze({
+    getTask(db, userId, taskId) {
+      const decision = authorize(version, db, userId, 'read', taskId);
+      if (decision.status !== 200) return decision;
+      return { status: 200, body: { id: taskId, ...decision.resource } };
+    },
 
-const v4 = {
-  _resolveRole(db, userId, project) {
-    const user = BASE.users[userId];
-    if (!user) return null;
+    editTask(db, userId, taskId, data = {}) {
+      const decision = authorize(version, db, userId, 'edit', taskId);
+      if (decision.status !== 200) return decision;
+      const error = validateTaskPatch(db, decision.project, data);
+      if (error) return error;
+      // Explicit assignment prevents arbitrary properties or prototype setters.
+      for (const field of ['title', 'status', 'assignee']) {
+        if (own(data, field)) decision.resource[field] = data[field];
+      }
+      return success();
+    },
 
-    // ✅ Admin chỉ là Owner trong cùng tenant
-    if (user.admin && user.tenant === project.tenant) return 'Owner';
+    deleteProject(db, userId, projectId) {
+      const decision = authorize(version, db, userId, 'delete', projectId);
+      if (decision.status !== 200) return decision;
+      for (const [taskId, task] of Object.entries(db.tasks)) {
+        if (task.project === projectId) delete db.tasks[taskId];
+      }
+      delete db.projects[projectId];
+      return success();
+    },
 
-    // Thành viên thông thường
-    return project.members[userId] || null;
-  },
+    manageMembers(db, userId, projectId, data = {}) {
+      const decision = authorize(version, db, userId, 'members', projectId);
+      if (decision.status !== 200) return decision;
+      const error = validateMemberChange(db, decision.project, data);
+      if (error) return error;
+      if (Object.keys(data).length === 0) return success();
+      if (data.remove === true) {
+        delete decision.project.members[data.userId];
+        for (const task of Object.values(db.tasks)) {
+          if (task.project === projectId && task.assignee === data.userId) task.assignee = null;
+        }
+      } else {
+        decision.project.members[data.userId] = data.role;
+      }
+      return success();
+    },
+  });
+}
 
-  _checkTenant(userId, project) {
-    const user = BASE.users[userId];
-    if (!user || !project) return false;
-    // Ranh giới tenant: người dùng thuộc tenant nào chỉ truy cập tài nguyên tenant đó
-    return user.tenant === project.tenant;
-  },
-
-  getTask(db, userId, taskId) {
-    const task = db.tasks[taskId];
-    if (!task) return { status: 404, body: { error: 'not_found' } };
-
-    const project = db.projects[task.project];
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-
-    // ✅ Kiểm tra tenant boundary
-    if (!this._checkTenant(userId, project)) {
-      return { status: 403, body: { error: 'forbidden', reason: 'tenant_mismatch' } };
-    }
-
-    const role = this._resolveRole(db, userId, project);
-    if (!canByRole(role, 'read'))
-      return { status: 403, body: { error: 'forbidden' } };
-
-    return { status: 200, body: { id: taskId, ...task } };
-  },
-
-  editTask(db, userId, taskId, data) {
-    const task = db.tasks[taskId];
-    if (!task) return { status: 404, body: { error: 'not_found' } };
-
-    const project = db.projects[task.project];
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-
-    // ✅ Kiểm tra tenant boundary
-    if (!this._checkTenant(userId, project)) {
-      return { status: 403, body: { error: 'forbidden', reason: 'tenant_mismatch' } };
-    }
-
-    const role = this._resolveRole(db, userId, project);
-    if (!canByRole(role, 'edit'))
-      return { status: 403, body: { error: 'forbidden' } };
-
-    // ReBAC + ABAC: Member chỉ sửa task của mình khi còn Open
-    if (role === 'Member') {
-      if (task.assignee !== userId)
-        return { status: 403, body: { error: 'forbidden', reason: 'not_assignee' } };
-      if (task.status !== 'Open')
-        return { status: 403, body: { error: 'forbidden', reason: 'task_closed' } };
-    }
-
-    Object.assign(task, data);
-    return { status: 200, body: { ok: true } };
-  },
-
-  deleteProject(db, userId, projectId) {
-    const project = getProject(db, projectId);
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-
-    // ✅ Kiểm tra tenant boundary
-    if (!this._checkTenant(userId, project)) {
-      return { status: 403, body: { error: 'forbidden', reason: 'tenant_mismatch' } };
-    }
-
-    const role = this._resolveRole(db, userId, project);
-    if (!canByRole(role, 'delete'))
-      return { status: 403, body: { error: 'forbidden' } };
-
-    delete db.projects[projectId];
-    return { status: 200, body: { ok: true } };
-  },
-
-  manageMembers(db, userId, projectId) {
-    const project = getProject(db, projectId);
-    if (!project) return { status: 404, body: { error: 'not_found' } };
-
-    // ✅ Kiểm tra tenant boundary
-    if (!this._checkTenant(userId, project)) {
-      return { status: 403, body: { error: 'forbidden', reason: 'tenant_mismatch' } };
-    }
-
-    const role = this._resolveRole(db, userId, project);
-    if (!canByRole(role, 'members'))
-      return { status: 403, body: { error: 'forbidden' } };
-
-    return { status: 200, body: { ok: true } };
-  },
-};
-
-module.exports = { v0, v1, v2, v3, v4 };
+module.exports = Object.fromEntries(['v0', 'v1', 'v2', 'v3', 'v4'].map(v => [v, createService(v)]));
+// Keep policy inspection available to tests without adding a selectable version.
+Object.defineProperty(module.exports, 'authorize', { value: authorize });

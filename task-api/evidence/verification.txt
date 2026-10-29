@@ -1,0 +1,21 @@
+Verification date: 2026-10-29 (Asia/Bangkok)
+Node: v24.11.0; platform: win32
+
+Backend: npm test -> RESULT: 150/150 passed; 0 failed; natural exit.
+This includes 36 role/action matrix cells, the 17 HTTP oracle cases,
+authorization bypass regressions, mutation invariants, membership revocation
+and the unchanged IDOR assertion (expected RED on V0, GREEN on V1).
+
+Browser: node tests/browser-e2e.js -> 11/11 checks passed; oracle 17/17; exit 0.
+Seven screenshots regenerated in public/screenshots/; oracle/evidence images visually inspected.
+
+Environment note: npm run test:all inside the Windows sandbox completed all backend
+checks but the headless browser launch timed out. The approved browser retry outside
+the sandbox passed. This is a split verification; a successful outside-sandbox
+test:all invocation is not claimed. The aggregate script runs the same two commands.
+
+Full sandbox attempt: verification-sandbox-attempt.txt
+Successful browser transcript: browser-e2e.txt
+IDOR responses and expected exit codes: idor-red-green.txt, idor-v0.txt, idor-v1.txt
+Dependency validation: npm ci --dry-run --offline --ignore-scripts --no-audit --no-fund --cache .npm-cache -> exit 0.
+Installed dependencies: express 4.22.3; jsonwebtoken 9.0.3; puppeteer-core 24.43.1.

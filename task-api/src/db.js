@@ -30,7 +30,7 @@ const BASE = {
   },
 };
 
-/** Trả về bản sao sâu của DB để mỗi request không chia sẻ dữ liệu */
+/** Bản sao sâu cho mỗi app hoặc fixture test; request cùng app dùng chung DB. */
 function cloneDB() {
   return JSON.parse(JSON.stringify(BASE));
 }

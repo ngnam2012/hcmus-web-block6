@@ -1,0 +1,5 @@
+Command: node tests/idor-regression.js --version=v1
+v1: {"status":403,"body":{"error":"forbidden"}}
+[GREEN] IDOR regression assertion passed
+
+Exit code: 0
