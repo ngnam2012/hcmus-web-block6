@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task API — Kiểm soát truy cập và Phân quyền (Block 6 HCMUS)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --primary: #58a6ff;
+      --primary-hover: #79b8ff;
+      --success: #3fb950;
+      --success-bg: rgba(63, 185, 80, 0.15);
+      --danger: #f85149;
+      --danger-bg: rgba(248, 81, 73, 0.15);
+      --warning: #d29922;
+      --warning-bg: rgba(210, 153, 34, 0.15);
+      --font-sans: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 24px;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge-primary { background: rgba(88, 166, 255, 0.15); color: var(--primary); border: 1px solid var(--primary); }
+    .badge-success { background: var(--success-bg); color: var(--success); border: 1px solid var(--success); }
+    .badge-danger { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+    .badge-warning { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning); }
+    
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+      overflow-x: auto;
+    }
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      background: var(--card-bg);
+      color: var(--primary);
+      border: 1px solid var(--border);
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn {
+      background: #21262d;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-family: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover { background: #30363d; border-color: #8b949e; }
+    .btn-primary { background: #238636; border-color: rgba(240, 246, 252, 0.1); color: #fff; }
+    .btn-primary:hover { background: #2ea043; }
+    .btn-danger { background: #da3633; border-color: rgba(240, 246, 252, 0.1); color: #fff; }
+    .btn-danger:hover { background: #f85149; }
+    .btn-sm { padding: 4px 10px; font-size: 0.825rem; }
+
+    select, input, textarea {
+      width: 100%;
+      background: #0d1117;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-family: inherit;
+      margin-top: 4px;
+      margin-bottom: 12px;
+    }
+    textarea { font-family: var(--font-mono); font-size: 0.85rem; }
+    label { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); }
+
+    pre.code {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      overflow-x: auto;
+      max-height: 380px;
+    }
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+      margin-top: 10px;
+    }
+    table.data-table th, table.data-table td {
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      text-align: left;
+    }
+    table.data-table th { background: #1f242c; font-weight: 700; }
+    table.data-table tr:hover { background: rgba(255, 255, 255, 0.02); }
+
+    .test-scenario-btn {
+      width: 100%;
+      text-align: left;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      background: #1c2128;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      color: var(--text);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: all 0.2s;
+    }
+    .test-scenario-btn:hover { background: #262c36; border-color: var(--primary); }
+    .status-pill {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .pill-200 { background: var(--success-bg); color: var(--success); }
+    .pill-401 { background: var(--warning-bg); color: var(--warning); }
+    .pill-403 { background: var(--danger-bg); color: var(--danger); }
+    .pill-404 { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div>
+      <h1 style="font-size:1.6rem; font-weight:800; display:flex; align-items:center; gap:10px;">
+        Task Management API
+        <span class="badge badge-primary">Block 6 — Kiểm soát truy cập và Phân quyền</span>
+      </h1>
+      <p style="color:var(--text-muted); font-size:0.9rem; margin-top:4px;">
+        Đại học Khoa học Tự nhiên TP.HCM (HCMUS) — Phát triển ứng dụng Web nâng cao
+      </p>
+    </div>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <div>
+        <span style="font-size:0.8rem; color:var(--text-muted); font-weight:600;">Phiên bản hoạt động:</span>
+        <select id="server-version-select" style="width:auto; margin:0; padding:6px 10px; font-weight:700;">
+          <option value="v0">V0 — Starter (Lỗ hổng IDOR / BOLA)</option>
+          <option value="v1">V1 — Sửa IDOR (Kiểm tra thành viên)</option>
+          <option value="v2">V2 — RBAC theo Project</option>
+          <option value="v3">V3 — ReBAC và ABAC</option>
+          <option value="v4" selected>V4 — Ranh giới Tenant (Hoàn chỉnh)</option>
+        </select>
+      </div>
+      <button class="btn btn-sm" id="btn-reset-db">Khởi tạo lại CSDL</button>
+    </div>
+  </header>
+
+  <!-- Thanh chuyển đổi Tabs -->
+  <div class="nav-tabs">
+    <button class="tab-btn active" data-tab="tab-e2e">Bàn làm việc kiểm thử tương tác</button>
+    <button class="tab-btn" data-tab="tab-oracle">Test Oracle (17 ca kiểm thử)</button>
+    <button class="tab-btn" data-tab="tab-matrix">Bảng ma trận phân quyền</button>
+    <button class="tab-btn" data-tab="tab-evidence">Minh chứng IDOR (Trước và Sau khi sửa)</button>
+  </div>
+
+  <!-- Tab 1: Bàn làm việc kiểm thử tương tác -->
+  <div id="tab-e2e" class="tab-content active">
+    <div class="grid-2">
+      <!-- Các kịch bản kiểm thử mẫu -->
+      <div>
+        <div class="card">
+          <div class="card-title">Các kịch bản kiểm thử nhanh (Nhấn để chạy)</div>
+          <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; cursor:pointer; font-size:0.85rem; color:var(--text); background:rgba(88,166,255,0.08); padding:8px 12px; border-radius:6px; border:1px solid var(--border);">
+            <input type="checkbox" id="auto-reset-cb" checked style="width:auto; margin:0;">
+            <span>Tự động làm mới CSDL trước mỗi request (Khuyên dùng khi thử nghiệm)</span>
+          </label>
+          <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:12px;">
+            Nhấn vào kịch bản bất kỳ để tự động cấu hình và gửi request kiểm thử đến API server:
+          </p>
+
+          <div style="font-size:0.8rem; font-weight:700; color:var(--primary); margin:8px 0 4px;">1. Xác thực và Đọc task (V1 Sửa IDOR)</div>
+          <button class="test-scenario-btn" data-who="alice" data-method="GET" data-path="/tasks/A1" data-desc="Alice đọc task A1 (thuộc Alpha)">
+            <span><b>Alice</b> đọc <b>Task A1</b> (cùng project Alpha)</span>
+            <span class="status-pill pill-200">Kỳ vọng: 200 OK</span>
+          </button>
+          <button class="test-scenario-btn" data-who="alice" data-method="GET" data-path="/tasks/B1" data-desc="Alice đọc task B1 (thuộc Beta - IDOR test)">
+            <span><b>Alice</b> đọc <b>Task B1</b> (Kiểm thử lỗi IDOR)</span>
+            <span class="status-pill pill-403">V0: 200 | V1+: 403</span>
+          </button>
+          <button class="test-scenario-btn" data-who="charlie" data-method="GET" data-path="/tasks/B1" data-desc="Charlie đọc task B1 (Owner Beta)">
+            <span><b>Charlie</b> đọc <b>Task B1</b> (Owner project Beta)</span>
+            <span class="status-pill pill-200">Kỳ vọng: 200 OK</span>
+          </button>
+
+          <div style="font-size:0.8rem; font-weight:700; color:var(--primary); margin:12px 0 4px;">2. Phân quyền chức năng RBAC (V2)</div>
+          <button class="test-scenario-btn" data-who="bob" data-method="DELETE" data-path="/projects/alpha" data-desc="Bob (Member) xóa Project Alpha">
+            <span><b>Bob</b> (Member) xóa Project Alpha</span>
+            <span class="status-pill pill-403">Kỳ vọng: 403</span>
+          </button>
+          <button class="test-scenario-btn" data-who="bob" data-method="DELETE" data-path="/projects/alpha" data-body='{"role":"Admin"}' data-desc="Bob tự khai role: Admin">
+            <span><b>Bob</b> tự khai body role=Admin để xóa Alpha</span>
+            <span class="status-pill pill-403">Kỳ vọng: 403</span>
+          </button>
+          <button class="test-scenario-btn" data-who="alice" data-method="DELETE" data-path="/projects/alpha" data-desc="Alice (Owner) xóa Project Alpha">
+            <span><b>Alice</b> (Owner) xóa Project Alpha</span>
+            <span class="status-pill pill-200">Kỳ vọng: 200 OK</span>
+          </button>
+
+          <div style="font-size:0.8rem; font-weight:700; color:var(--primary); margin:12px 0 4px;">3. Điều kiện ReBAC và ABAC (V3)</div>
+          <button class="test-scenario-btn" data-who="bob" data-method="PATCH" data-path="/tasks/A1" data-body='{"title":"Đã sửa bởi Bob"}' data-desc="Bob sửa A1 (assignee=bob, Open)">
+            <span><b>Bob</b> sửa Task A1 (được giao, còn mở)</span>
+            <span class="status-pill pill-200">Kỳ vọng: 200 OK</span>
+          </button>
+          <button class="test-scenario-btn" data-who="bob" data-method="PATCH" data-path="/tasks/A2" data-body='{"title":"Bob cố sửa"}' data-desc="Bob sửa A2 (chưa assign)">
+            <span><b>Bob</b> sửa Task A2 (chưa được giao cho Bob)</span>
+            <span class="status-pill pill-403">Kỳ vọng: 403</span>
+          </button>
+
+          <div style="font-size:0.8rem; font-weight:700; color:var(--primary); margin:12px 0 4px;">4. Ranh giới Tenant (V4)</div>
+          <button class="test-scenario-btn" data-who="dana" data-method="GET" data-path="/tasks/A1" data-desc="Dana (Admin Alpha) đọc A1">
+            <span><b>Dana</b> (Admin Alpha) đọc Task A1 (cùng tenant Alpha)</span>
+            <span class="status-pill pill-200">Kỳ vọng: 200 OK</span>
+          </button>
+          <button class="test-scenario-btn" data-who="dana" data-method="GET" data-path="/tasks/B1" data-desc="Dana đọc B1 (thuộc Beta)">
+            <span><b>Dana</b> đọc Task B1 (khác tenant Beta)</span>
+            <span class="status-pill pill-403">Kỳ vọng: 403</span>
+          </button>
+          <button class="test-scenario-btn" data-who="dana" data-method="GET" data-path="/tasks/B1" data-header="X-Tenant-Id: beta" data-desc="Dana gửi X-Tenant-Id: beta">
+            <span><b>Dana</b> gửi header X-Tenant-Id: beta</span>
+            <span class="status-pill pill-403">Kỳ vọng: 403</span>
+          </button>
+          <button class="test-scenario-btn" data-who="anonymous" data-method="GET" data-path="/tasks/A1" data-desc="Không gửi Authorization header">
+            <span><b>Anonymous</b> (không gửi token) đọc Task A1</span>
+            <span class="status-pill pill-401">Kỳ vọng: 401</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Bảng điều khiển gửi request trực tiếp -->
+      <div>
+        <div class="card">
+          <div class="card-title">Bảng điều khiển gửi Request trực tiếp</div>
+          <div class="grid-2" style="margin-bottom:8px;">
+            <div>
+              <label>Người gọi (Người dùng / Token):</label>
+              <select id="req-user">
+                <option value="alice">Alice (Owner Alpha, tenant alpha)</option>
+                <option value="bob">Bob (Member Alpha, tenant alpha)</option>
+                <option value="charlie">Charlie (Owner Beta, tenant beta)</option>
+                <option value="dana">Dana (Admin Alpha, tenant alpha)</option>
+                <option value="anonymous">Anonymous (Không gửi Token)</option>
+              </select>
+            </div>
+            <div>
+              <label>Phương thức HTTP:</label>
+              <select id="req-method">
+                <option value="GET">GET</option>
+                <option value="PATCH">PATCH</option>
+                <option value="DELETE">DELETE</option>
+                <option value="POST">POST</option>
+              </select>
+            </div>
+          </div>
+
+          <label>Đường dẫn API (Endpoint URL):</label>
+          <input type="text" id="req-path" value="/tasks/A1">
+
+          <label>Header tùy chọn (ví dụ: X-Tenant-Id: beta, X-Version: v0):</label>
+          <input type="text" id="req-headers" placeholder="Ví dụ: X-Tenant-Id: beta">
+
+          <label>Dữ liệu gửi kèm (Request Body JSON):</label>
+          <textarea id="req-body" rows="3" placeholder='{"title": "Tiêu đề mới", "status": "Open"}'></textarea>
+
+          <button class="btn btn-primary" id="btn-send-req" style="width:100%; justify-content:center; margin-top:8px;">
+            GỬI REQUEST ĐẾN SERVER
+          </button>
+        </div>
+
+        <div class="card">
+          <div class="card-title" style="justify-content:space-between;">
+            <span>Kết quả phản hồi (Live HTTP Response)</span>
+            <span id="res-status-badge" class="badge badge-primary">CHỜ REQUEST</span>
+          </div>
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px;" id="res-time-meta"></div>
+          <div id="res-explanation" style="display:none; padding:10px 14px; border-radius:6px; font-size:0.85rem; margin-bottom:12px; line-height:1.5;"></div>
+          <pre class="code" id="res-body-output">// Nhấn nút gửi request để xem kết quả phản hồi từ API...</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 2: Test Oracle (17 Tests) -->
+  <div id="tab-oracle" class="tab-content">
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+        <div>
+          <div class="card-title" style="margin-bottom:4px;">Test Oracle — 17 ca kiểm thử tự động chuẩn Slide</div>
+          <p style="font-size:0.85rem; color:var(--text-muted);">
+            Kiểm thử toàn diện qua HTTP thực tế đến Backend Server cho phiên bản đang kích hoạt.
+          </p>
+        </div>
+        <button class="btn btn-primary" id="btn-run-all-oracle">CHẠY TOÀN BỘ TEST ORACLE</button>
+      </div>
+
+      <div id="oracle-summary" style="display:none; padding:12px 16px; border-radius:6px; margin-bottom:16px;"></div>
+
+      <table class="data-table" id="oracle-table">
+        <thead>
+          <tr>
+            <th style="width:40px;">STT</th>
+            <th style="width:50px;">Bản</th>
+            <th>Tên kiểm thử</th>
+            <th>Người gọi</th>
+            <th>Thao tác</th>
+            <th style="width:110px;">Kỳ vọng</th>
+            <th style="width:110px;">Thực tế</th>
+            <th style="width:100px; text-align:center;">Kết quả</th>
+          </tr>
+        </thead>
+        <tbody id="oracle-tbody">
+          <tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:20px;">Nhấn nút "CHẠY TOÀN BỘ TEST ORACLE" để bắt đầu kiểm thử trực tiếp...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Tab 3: Bảng ma trận phân quyền -->
+  <div id="tab-matrix" class="tab-content">
+    <div class="card">
+      <div class="card-title">Bảng ma trận chính sách phân quyền (Permission Matrix)</div>
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">
+        Bảng phân định quyền chi tiết giữa các vai trò (Roles), tài nguyên (Resources), thao tác (Actions) và các điều kiện ngữ cảnh (Conditions) theo chuẩn Slide 26.
+      </p>
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Vai trò (Role)</th>
+            <th>Tài nguyên</th>
+            <th>Đọc Task (`read`)</th>
+            <th>Sửa Task (`edit`)</th>
+            <th>Xóa Project (`delete`)</th>
+            <th>Quản lý thành viên (`members`)</th>
+            <th>Điều kiện bổ sung (ReBAC / ABAC / Tenant)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Anonymous</b></td>
+            <td>Tất cả</td>
+            <td>Từ chối (401)</td>
+            <td>Từ chối (401)</td>
+            <td>Từ chối (401)</td>
+            <td>Từ chối (401)</td>
+            <td>Chưa qua xác thực danh tính (Authentication layer)</td>
+          </tr>
+          <tr>
+            <td><b>Viewer</b></td>
+            <td>Task / Project</td>
+            <td>Cho phép (200)</td>
+            <td>Từ chối (403)</td>
+            <td>Từ chối (403)</td>
+            <td>Từ chối (403)</td>
+            <td>Chỉ đọc nội dung trong project mình thuộc về</td>
+          </tr>
+          <tr>
+            <td><b>Member</b></td>
+            <td>Task / Project</td>
+            <td>Cho phép (200)</td>
+            <td>Có điều kiện</td>
+            <td>Từ chối (403)</td>
+            <td>Từ chối (403)</td>
+            <td><b>ReBAC</b>: <code>assignee == userId</code><br><b>ABAC</b>: <code>status == 'Open'</code></td>
+          </tr>
+          <tr>
+            <td><b>Project Owner</b></td>
+            <td>Task / Project</td>
+            <td>Cho phép (200)</td>
+            <td>Cho phép (200)</td>
+            <td>Cho phép (200)</td>
+            <td>Cho phép (200)</td>
+            <td>Toàn quyền trong phạm vi project thuộc về</td>
+          </tr>
+          <tr>
+            <td><b>Admin (Dana)</b></td>
+            <td>Task / Project</td>
+            <td>Cho phép (200)</td>
+            <td>Cho phép (200)</td>
+            <td>Cho phép (200)</td>
+            <td>Cho phép (200)</td>
+            <td><b>Ranh giới Tenant (V4)</b>: Chỉ là Owner trong tenant của mình (<code>user.tenant == project.tenant</code>)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Tab 4: Minh chứng IDOR -->
+  <div id="tab-evidence" class="tab-content">
+    <div class="card">
+      <div class="card-title">Bằng chứng tái hiện và khắc phục lỗ hổng IDOR / BOLA</div>
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">
+        Đối chiếu kịch bản tấn công: <b>Alice</b> (thuộc Project Alpha) gọi <code>GET /tasks/B1</code> (task nhạy cảm thuộc Project Beta).
+      </p>
+
+      <div class="grid-2">
+        <div>
+          <div style="font-weight:700; color:var(--danger); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+            <span class="badge badge-danger">V0: LỖ HỔNG IDOR (Trước khi sửa)</span>
+          </div>
+          <pre class="code"><code>// Request
+GET /tasks/B1 HTTP/1.1
+Host: localhost:3000
+Authorization: Bearer &lt;token-alice&gt;
+
+// Response: 200 OK (Dữ liệu bí mật bị lộ)
+{
+  "id": "B1",
+  "project": "beta",
+  "title": "Ngân sách dự án Beta",
+  "assignee": "charlie",
+  "status": "Open"
+}</code></pre>
+          <div style="background:var(--danger-bg); border:1px solid var(--danger); padding:10px 14px; border-radius:6px; font-size:0.85rem; margin-top:8px;">
+            <b>Hậu quả:</b> Server chỉ kiểm tra token hợp lệ nhưng không kiểm tra quyền của Alice đối với object B1. Alice đọc được toàn bộ ngân sách dự án bí mật của Project Beta.
+          </div>
+        </div>
+
+        <div>
+          <div style="font-weight:700; color:var(--success); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+            <span class="badge badge-success">V1+: ĐÃ KHẮC PHỤC (Sau khi sửa)</span>
+          </div>
+          <pre class="code"><code>// Request
+GET /tasks/B1 HTTP/1.1
+Host: localhost:3000
+Authorization: Bearer &lt;token-alice&gt;
+
+// Response: 403 Forbidden (Bị chặn tại Server)
+{
+  "error": "forbidden"
+}</code></pre>
+          <div style="background:var(--success-bg); border:1px solid var(--success); padding:10px 14px; border-radius:6px; font-size:0.85rem; margin-top:8px;">
+            <b>Khắc phục:</b> TaskService kiểm tra quyền sở hữu đối tượng tại Business Layer: Alice không thuộc thành viên Project Beta -&gt; Từ chối ngay lập tức với mã 403. Test cho phép (Alice đọc A1) vẫn đạt 200 OK.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  let tokens = {};
+
+  // Lấy danh sách tokens khi tải trang
+  async function loadTokens() {
+    try {
+      const res = await fetch('/api/tokens');
+      const data = await res.json();
+      tokens = data.tokens;
+    } catch (e) {
+      console.error('Không thể lấy tokens:', e);
+    }
+  }
+
+  // Chuyển đổi qua lại giữa các Tabs
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  // Chuyển đổi phiên bản API
+  const verSelect = document.getElementById('server-version-select');
+  verSelect.addEventListener('change', async () => {
+    await fetch('/api/version', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version: verSelect.value })
+    });
+  });
+
+  // Khởi tạo lại cơ sở dữ liệu
+  document.getElementById('btn-reset-db').addEventListener('click', async () => {
+    const res = await fetch('/api/test/reset', { method: 'POST' });
+    const data = await res.json();
+    alert(data.message);
+  });
+
+  // Thực thi Request
+  async function executeRequest(method, path, who, bodyStr, customHeaders = '') {
+    const headers = { 'Content-Type': 'application/json' };
+    if (who !== 'anonymous' && tokens[who]) {
+      headers['Authorization'] = 'Bearer ' + tokens[who];
+    }
+    if (customHeaders) {
+      customHeaders.split(',').forEach(h => {
+        const parts = h.split(':');
+        if (parts.length === 2) headers[parts[0].trim()] = parts[1].trim();
+      });
+    }
+
+    const opts = { method, headers };
+    if (['POST', 'PATCH', 'PUT'].includes(method) && bodyStr) {
+      opts.body = bodyStr;
+    }
+
+    const t0 = performance.now();
+    try {
+      const res = await fetch(path, opts);
+      const t1 = performance.now();
+      const status = res.status;
+      let bodyData;
+      try { bodyData = await res.json(); } catch (_) { bodyData = await res.text(); }
+
+      return { status, bodyData, duration: Math.round(t1 - t0) };
+    } catch (err) {
+      return { status: 0, bodyData: { error: err.message }, duration: 0 };
+    }
+  }
+
+  document.getElementById('btn-send-req').addEventListener('click', async () => {
+    const autoReset = document.getElementById('auto-reset-cb')?.checked;
+    if (autoReset) {
+      await fetch('/api/test/reset', { method: 'POST' });
+    }
+
+    const method = document.getElementById('req-method').value;
+    const path = document.getElementById('req-path').value;
+    const who = document.getElementById('req-user').value;
+    const bodyStr = document.getElementById('req-body').value;
+    const customH = document.getElementById('req-headers').value;
+
+    const badge = document.getElementById('res-status-badge');
+    badge.className = 'badge badge-warning';
+    badge.textContent = 'ĐANG GỬI...';
+
+    const { status, bodyData, duration } = await executeRequest(method, path, who, bodyStr, customH);
+
+    badge.textContent = status + ' ' + (status === 200 ? 'OK' : status === 401 ? 'UNAUTHORIZED' : status === 403 ? 'FORBIDDEN' : status === 404 ? 'NOT FOUND' : '');
+    badge.className = 'badge ' + (status >= 200 && status < 300 ? 'badge-success' : status === 401 ? 'badge-warning' : 'badge-danger');
+
+    document.getElementById('res-time-meta').textContent = `Thời gian xử lý: ${duration}ms | Mã HTTP ${status}`;
+    document.getElementById('res-body-output').textContent = JSON.stringify(bodyData, null, 2);
+
+    const explBox = document.getElementById('res-explanation');
+    explBox.style.display = 'block';
+
+    if (status === 200) {
+      explBox.style.background = 'var(--success-bg)';
+      explBox.style.border = '1px solid var(--success)';
+      explBox.innerHTML = '<b>Thành công (200 OK):</b> Yêu cầu hợp lệ và người gọi có đầy đủ quyền hạn trên tài nguyên này.';
+    } else if (status === 401) {
+      explBox.style.background = 'var(--warning-bg)';
+      explBox.style.border = '1px solid var(--warning)';
+      explBox.innerHTML = '<b>Từ chối xác thực (401 Unauthorized):</b> Request không có token hoặc token không hợp lệ / đã hết hạn.';
+    } else if (status === 403) {
+      explBox.style.background = 'var(--danger-bg)';
+      explBox.style.border = '1px solid var(--danger)';
+      let reasonText = 'Người gọi không có quyền truy cập đối tượng này.';
+      if (bodyData && bodyData.reason === 'tenant_mismatch') reasonText = 'Vi phạm ranh giới Tenant (người dùng thuộc tenant khác).';
+      else if (bodyData && bodyData.reason === 'not_assignee') reasonText = 'Vi phạm ReBAC: Member chỉ được sửa task được phân công cho chính mình.';
+      else if (bodyData && bodyData.reason === 'task_closed') reasonText = 'Vi phạm ABAC: Task đã đóng (Closed), không được phép chỉnh sửa.';
+      explBox.innerHTML = `<b>Từ chối phân quyền (403 Forbidden):</b> ${reasonText}`;
+    } else if (status === 404) {
+      explBox.style.background = 'rgba(210, 153, 34, 0.15)';
+      explBox.style.border = '1px solid var(--warning)';
+      explBox.innerHTML = `<b>Tài nguyên không tồn tại (404 Not Found):</b><br>
+        - Task hoặc Project không có trong hệ thống, HOẶC Project chứa task này vừa bị xóa bởi lệnh DELETE trước đó.<br>
+        - <b>Giải pháp:</b> Bấm nút <a href="javascript:void(0)" onclick="document.getElementById('btn-reset-db').click()" style="color:var(--primary); font-weight:700; text-decoration:underline;">Khởi tạo lại CSDL</a> để khôi phục dữ liệu mẫu rồi thử lại.`;
+    }
+  });
+
+  // Chọn nhanh kịch bản kiểm thử
+  document.querySelectorAll('.test-scenario-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('req-user').value = btn.dataset.who;
+      document.getElementById('req-method').value = btn.dataset.method;
+      document.getElementById('req-path').value = btn.dataset.path;
+      document.getElementById('req-body').value = btn.dataset.body || '';
+      document.getElementById('req-headers').value = btn.dataset.header || '';
+      document.getElementById('btn-send-req').click();
+    });
+  });
+
+  // Định nghĩa 17 ca kiểm thử theo đúng Test Oracle của slide
+  const ORACLE_TESTS = [
+    { v: 1, name: 'Anonymous đọc task A1 (không có token)', who: 'anonymous', m: 'GET', p: '/tasks/A1', exp: 401 },
+    { v: 1, name: 'Alice đọc task A1 (cùng project Alpha)', who: 'alice', m: 'GET', p: '/tasks/A1', exp: 200 },
+    { v: 1, name: 'Alice đọc task B1 (project Beta khác)', who: 'alice', m: 'GET', p: '/tasks/B1', exp: 403 },
+    { v: 1, name: 'Charlie đọc task B1 (Owner project Beta)', who: 'charlie', m: 'GET', p: '/tasks/B1', exp: 200 },
+    { v: 2, name: 'Viewer sửa task A1', who: 'bob', m: 'PATCH', p: '/tasks/A1', fx: 'viewer', exp: 403 },
+    { v: 2, name: 'Member xóa project Alpha', who: 'bob', m: 'DELETE', p: '/projects/alpha', exp: 403 },
+    { v: 2, name: 'Member quản lý thành viên project Alpha', who: 'bob', m: 'POST', p: '/projects/alpha/members', exp: 403 },
+    { v: 2, name: 'Owner xóa project Alpha', who: 'alice', m: 'DELETE', p: '/projects/alpha', exp: 200 },
+    { v: 2, name: 'Owner quản lý thành viên project Alpha', who: 'alice', m: 'POST', p: '/projects/alpha/members', exp: 200 },
+    { v: 2, name: 'Bob tự khai role=Admin để xóa project', who: 'bob', m: 'DELETE', p: '/projects/alpha', b: '{"role":"Admin"}', exp: 403 },
+    { v: 3, name: 'Member sửa task được giao và còn mở (A1)', who: 'bob', m: 'PATCH', p: '/tasks/A1', b: '{"title":"Đã sửa"}', exp: 200 },
+    { v: 3, name: 'Member sửa task chưa được giao (A2)', who: 'bob', m: 'PATCH', p: '/tasks/A2', b: '{"title":"Đã sửa"}', exp: 403 },
+    { v: 3, name: 'Member sửa task đã đóng (A1 Closed)', who: 'bob', m: 'PATCH', p: '/tasks/A1', fx: 'closed', exp: 403 },
+    { v: 3, name: 'Member sửa task thuộc project khác (B1)', who: 'bob', m: 'PATCH', p: '/tasks/B1', exp: 403 },
+    { v: 4, name: 'Admin Alpha đọc task A1 (cùng tenant)', who: 'dana', m: 'GET', p: '/tasks/A1', exp: 200 },
+    { v: 4, name: 'Admin Alpha đọc task B1 (tenant Beta khác)', who: 'dana', m: 'GET', p: '/tasks/B1', exp: 403 },
+    { v: 4, name: 'Admin Alpha đọc task B1 kèm header tenantId=beta', who: 'dana', m: 'GET', p: '/tasks/B1', h: 'X-Tenant-Id: beta', exp: 403 }
+  ];
+
+  // Chạy toàn bộ Test Oracle
+  document.getElementById('btn-run-all-oracle').addEventListener('click', async () => {
+    const tbody = document.getElementById('oracle-tbody');
+    tbody.innerHTML = '';
+    const btn = document.getElementById('btn-run-all-oracle');
+    btn.disabled = true;
+    btn.textContent = 'ĐANG CHẠY KIỂM THỬ...';
+
+    let passCount = 0;
+    for (let i = 0; i < ORACLE_TESTS.length; i++) {
+      const t = ORACLE_TESTS[i];
+
+      // Độc lập dữ liệu (Data Isolation): Khởi tạo lại CSDL trước mỗi ca kiểm thử, kèm fixture nếu có
+      await fetch('/api/test/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fixture: t.fx || null })
+      });
+
+      const res = await executeRequest(t.m, t.p, t.who, t.b, t.h);
+      const isPass = (t.exp === 200 && res.status >= 200 && res.status < 300) ||
+                     (t.exp === 401 && res.status === 401) ||
+                     (t.exp === 403 && (res.status === 403 || res.status === 404));
+
+      if (isPass) passCount++;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="font-family:var(--font-mono); font-weight:700;">${i+1}</td>
+        <td><span class="badge badge-primary">V${t.v}</span></td>
+        <td><b>${t.name}</b></td>
+        <td><code>${t.who}</code></td>
+        <td><code>${t.m} ${t.p}</code></td>
+        <td><span class="status-pill pill-${t.exp}">HTTP ${t.exp}</span></td>
+        <td><span class="status-pill pill-${res.status}">HTTP ${res.status}</span></td>
+        <td style="text-align:center;">
+          ${isPass ? '<span class="badge badge-success">ĐẠT</span>' : '<span class="badge badge-danger">KHÔNG ĐẠT</span>'}
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    const summary = document.getElementById('oracle-summary');
+    summary.style.display = 'block';
+    if (passCount === ORACLE_TESTS.length) {
+      summary.style.background = 'var(--success-bg)';
+      summary.style.border = '1px solid var(--success)';
+      summary.innerHTML = `<b style="color:var(--success);">XUẤT SẮC:</b> Đã vượt qua <b>${passCount}/${ORACLE_TESTS.length}</b> ca kiểm thử (100% ĐẠT). Toàn bộ logic Phân quyền (Authorization), RBAC, ReBAC, ABAC và Ranh giới Tenant hoạt động chính xác.`;
+    } else {
+      summary.style.background = 'var(--warning-bg)';
+      summary.style.border = '1px solid var(--warning)';
+      summary.innerHTML = `<b style="color:var(--warning);">KẾT QUẢ:</b> Đã vượt qua <b>${passCount}/${ORACLE_TESTS.length}</b> ca kiểm thử cho phiên bản <b>${verSelect.value.toUpperCase()}</b>.`;
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'CHẠY LẠI TOÀN BỘ TEST ORACLE';
+  });
+
+  loadTokens();
+</script>
+
+</body>
+</html>

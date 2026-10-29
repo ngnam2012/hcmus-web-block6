@@ -1,110 +1,77 @@
 # Task API — Bài thực hành Authorization & Access Control (Block 6)
+**Trường:** Đại học Khoa học Tự nhiên TP.HCM (HCMUS) — Advanced Web Development
 
-## Cấu trúc dự án
+> 📄 **Xem báo cáo nộp bài chi tiết 5 thành phần theo chuẩn Slide 26 tại [REPORT.md](./REPORT.md)**.
+
+---
+
+## 1. Cấu trúc dự án
 
 ```
 task-api/
+├── public/
+│   └── index.html      # Interactive E2E Browser Dashboard (giao diện web kiểm thử trực quan)
 ├── src/
 │   ├── db.js           # Dữ liệu mẫu (users, projects, tasks)
-│   ├── auth.js         # Middleware xác thực JWT
+│   ├── auth.js         # Middleware xác thực JWT Bearer Token
 │   ├── rbac.js         # Ma trận quyền RBAC
-│   ├── taskService.js  # Business layer: v0, v1, v2, v3, v4
-│   └── server.js       # Express server
-└── tests/
-    ├── run.js           # Test runner (31 test cases)
-    └── generate-tokens.js
+│   ├── taskService.js  # Business layer: PEP & PDP (v0, v1, v2, v3, v4)
+│   └── server.js       # Express server & API endpoints
+├── tests/
+│   ├── run.js          # Test runner tự động (39 test cases: unit + HTTP integration)
+│   └── generate-tokens.js
+├── REPORT.md           # Báo cáo nộp bài đầy đủ 5 thành phần chuẩn Slide 26
+└── package.json
 ```
 
-## Dữ liệu mẫu
+---
 
-| User    | Tenant | Role                  |
-|---------|--------|-----------------------|
-| alice   | alpha  | Owner của Alpha       |
-| bob     | alpha  | Member của Alpha      |
-| charlie | beta   | Owner của Beta        |
-| dana    | alpha  | Admin (global → V2) / Admin Alpha (V4) |
+## 2. Hướng dẫn chạy và kiểm thử
 
-| Task | Project | Assignee | Status |
-|------|---------|----------|--------|
-| A1   | Alpha   | bob      | Open   |
-| A2   | Alpha   | (chưa)   | Open   |
-| B1   | Beta    | charlie  | Open   |
-| B2   | Beta    | (chưa)   | Open   |
-
-## Các phiên bản
-
-### V0 — Starter (IDOR lỗ hổng)
-Chỉ kiểm token. Alice có thể đọc B1 (task của Beta) dù không thuộc project Beta.
-
-### V1 — Kiểm thành viên project
-- `GET /tasks/:id`: kiểm `member(project)` → fix IDOR cho thao tác đọc.
-- Thao tác ghi (PATCH, DELETE) chưa được bảo vệ.
-
-### V2 — RBAC
-- Role lấy từ `db.projects[pid].members[userId]` (không tin client tự khai).
-- Ma trận: `Viewer → read; Member → read+edit; Owner → all`.
-- Admin global = Owner mọi project (chưa có tenant boundary).
-
-### V3 — RBAC + ABAC
-- Giữ nguyên V2.
-- **Thêm**: Member chỉ sửa task được giao cho mình (`assignee == userId`) VÀ task còn Open (`status == 'Open'`).
-
-### V4 — Tenant Boundary
-- **Thêm**: Admin chỉ là Owner trong tenant của chính họ.
-- `tenantId` lấy từ `BASE.users[userId].tenant` — không đọc từ header/body client.
-
-## Chạy server
-
+### Cài đặt dependencies
 ```bash
-# Cài đặt
 npm install
-
-# Chạy V4 (phiên bản đầy đủ)
-npm start           # VERSION mặc định = v4
-
-# Hoặc chạy từng phiên bản
-npm run start:v0    # Starter (có lỗi IDOR)
-npm run start:v1
-npm run start:v2
-npm run start:v3
-npm run start:v4
 ```
 
-## Chạy tests
-
+### Chạy kiểm thử tự động (Automated Tests)
 ```bash
 npm test
-# → 31 tests: V1, V2, V3, V4, IDOR demo, HTTP semantics
 ```
+> Lệnh trên sẽ tự động chạy **39 test cases** bao gồm 31 unit test logic phân quyền qua các tầng V1-V4 và 8 HTTP integration test thực tế qua Express server.
 
-## Test với curl
+### Trải nghiệm kiểm thử E2E trên trình duyệt (Browser Dashboard)
+1. Khởi động server:
+   ```bash
+   npm start
+   ```
+2. Mở trình duyệt tại:
+   ```
+   http://localhost:3000
+   ```
+3. Tại giao diện web, bạn có thể:
+   - Thử nghiệm 1-click các kịch bản đọc, sửa, xóa, giả mạo role, giả mạo tenant.
+   - Bấm nút **"🚀 CHẠY TOÀN BỘ TEST ORACLE"** để xem 17 test chạy tự động ngay trên trình duyệt.
+   - Xem bảng ma trận phân quyền và so sánh minh chứng lỗi IDOR (trước vs sau khi sửa).
 
+### Khởi động từng phiên bản cụ thể (Cross-platform)
 ```bash
-# Tạo token
-npm run tokens
-
-# Đọc task A1 với token alice
-curl -H "Authorization: Bearer <token-alice>" http://localhost:3000/tasks/A1
-
-# Thử IDOR: Alice đọc B1 (phải 403 ở V1+, nhưng 200 ở V0!)
-curl -H "Authorization: Bearer <token-alice>" http://localhost:3000/tasks/B1
-
-# Bob xóa project Alpha (phải 403)
-curl -X DELETE -H "Authorization: Bearer <token-bob>" http://localhost:3000/projects/alpha
-
-# Alice xóa project Alpha (phải 200 ở V2+)
-curl -X DELETE -H "Authorization: Bearer <token-alice>" http://localhost:3000/projects/alpha
+npm run start:v0    # V0: Starter (có lỗ hổng IDOR)
+npm run start:v1    # V1: Sửa IDOR đọc
+npm run start:v2    # V2: RBAC theo project
+npm run start:v3    # V3: ReBAC + ABAC
+npm run start:v4    # V4: Tenant boundary (Hoàn chỉnh)
 ```
 
-## Nguyên tắc bảo mật áp dụng
+---
 
-| Nguyên tắc | Được thể hiện ở |
-|---|---|
-| **Deny by default** | Service trả 403 nếu không có rule nào cho phép |
-| **Authentication → Scope → Object-level** | Middleware `authenticate` → RBAC → ABAC |
-| **Không tin client** | `tenantId`, `role`, `userId` luôn lấy từ DB/token, không từ body/header |
-| **PEP ở business layer** | `taskService.js` là PEP/PDP duy nhất cho mọi entry point |
-| **Test cho phép + test từ chối** | 31 tests bao gồm cả hai loại |
-| **IDOR/BOLA fix** | V1 kiểm `member(project)` trước khi trả dữ liệu |
-| **Tenant isolation** | V4 kiểm `user.tenant === project.tenant` |
+## 3. Bảng tóm tắt các phiên bản (V0 → V4)
 
+| Phiên bản | Nội dung kiểm quyền | Mục tiêu giải quyết |
+|---|---|---|
+| **V0** | Chỉ kiểm token hợp lệ | Tái hiện lỗ hổng IDOR/BOLA (Alice đọc được B1) |
+| **V1** | Kiểm thành viên project khi đọc | Sửa lỗi IDOR cho thao tác `read` |
+| **V2** | RBAC theo project (`Viewer`, `Member`, `Owner`) | Bảo vệ thao tác ghi, xóa, quản lý TV; chống giả mạo role |
+| **V3** | ReBAC (`assignee`) + ABAC (`status == 'Open'`) | Thu hẹp quyền sửa của `Member` |
+| **V4** | Tenant Boundary (`user.tenant == project.tenant`) | Cách ly tổ chức; Admin chỉ có quyền trong tenant của mình |
+
+Chi tiết đầy đủ về **Bảng chính sách quyền, Automated tests, Evidence IDOR, Code Diff, và Giải thích lựa chọn** được trình bày chi tiết trong file **[REPORT.md](./REPORT.md)**.
